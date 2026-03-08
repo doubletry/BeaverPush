@@ -1,0 +1,124 @@
+"""
+配置持久化管理模块
+==================
+
+负责应用配置的加载和保存，使用 JSON 文件存储。
+
+配置文件位置:
+    - Windows: ``%APPDATA%/PushClient/config.json``
+    - 其他:    ``~/PushClient/config.json``
+
+数据结构:
+    - ``StreamConfig`` : 单路推流通道的参数（源类型、路径、编码器等）
+    - ``AppConfig``    : 应用全局配置（RTSP 服务器地址 + 通道列表）
+
+典型用法::
+
+    cfg = load_config()          # 加载
+    cfg.rtsp_server = "rtsp://..."
+    cfg.add_stream(StreamConfig(name="stream1", ...))
+    save_config(cfg)             # 保存
+"""
+
+import json
+import os
+from pathlib import Path
+from dataclasses import dataclass, field, asdict
+
+CONFIG_DIR = Path(os.environ.get("APPDATA", Path.home())) / "PushClient"
+CONFIG_FILE = CONFIG_DIR / "config.json"
+
+
+@dataclass
+class StreamConfig:
+    """单路推流通道的配置参数。
+
+    Attributes:
+        name:         流名称，作为 RTSP URL 的最后一段路径
+        source_type:  视频源类型 (``"video"``/``"camera"``/``"rtsp"``/``"screen"``/``"window"``)
+        source_path:  视频文件路径 / 设备名 / RTSP URL / 屏幕偏移 / 窗口句柄
+        rtsp_url:     完整的 RTSP 推流地址（由运行时拼接）
+        loop:         是否循环播放（仅本地视频有效）
+        preview:      是否启用 ffplay 预览
+        video_codec:  视频编码器 (空字符串表示自动)
+        width:        输出宽度（空字符串表示使用原始宽度）
+        height:       输出高度
+        framerate:    输出帧率
+        bitrate:      输出码率 (如 ``"2M"``)
+        auto_start:   是否自动开始推流（保存时记录推流状态，加载时自动恢复）
+    """
+    name: str = ""
+    source_type: str = ""       # video / camera / rtsp / screen / window
+    source_path: str = ""       # 文件路径 / 设备名 / RTSP URL / 屏幕索引 / hwnd
+    rtsp_url: str = ""
+    loop: bool = False
+    preview: bool = False
+    video_codec: str = ""
+    width: str = ""
+    height: str = ""
+    framerate: str = ""
+    bitrate: str = ""
+    auto_start: bool = False
+
+
+@dataclass
+class AppConfig:
+    """应用全局配置。
+
+    Attributes:
+        rtsp_server:     RTSP 服务器地址（如 ``"rtsp://192.168.1.100:8554"``）
+        server_locked:   RTSP 服务器地址是否锁定
+        default_codec:   全局默认编码器（空字符串表示自动）
+        default_width:   全局默认输出宽度
+        default_height:  全局默认输出高度
+        default_fps:     全局默认帧率
+        default_bitrate: 全局默认码率（如 ``"2M"``）
+        streams:         推流通道配置列表，每个元素为 :class:`StreamConfig` 的字典形式
+    """
+
+    rtsp_server: str = ""
+    server_locked: bool = False
+    default_codec: str = ""
+    default_width: str = ""
+    default_height: str = ""
+    default_fps: str = ""
+    default_bitrate: str = ""
+    streams: list[dict] = field(default_factory=list)
+
+    def add_stream(self, cfg: StreamConfig):
+        """添加一路推流配置。"""
+        self.streams.append(asdict(cfg))
+
+    def remove_stream(self, index: int):
+        """移除指定索引的推流配置。"""
+        if 0 <= index < len(self.streams):
+            self.streams.pop(index)
+
+
+def load_config() -> AppConfig:
+    """从文件加载配置"""
+    if CONFIG_FILE.exists():
+        try:
+            data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+            return AppConfig(
+                rtsp_server=data.get("rtsp_server", ""),
+                server_locked=data.get("server_locked", False),
+                default_codec=data.get("default_codec", ""),
+                default_width=data.get("default_width", ""),
+                default_height=data.get("default_height", ""),
+                default_fps=data.get("default_fps", ""),
+                default_bitrate=data.get("default_bitrate", ""),
+                streams=data.get("streams", []),
+            )
+        except Exception:
+            pass
+    return AppConfig()
+
+
+def save_config(cfg: AppConfig):
+    """保存配置到文件"""
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    CONFIG_FILE.write_text(
+        json.dumps(asdict(cfg), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
