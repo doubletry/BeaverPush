@@ -136,8 +136,9 @@ class TestStreamControllerSourceDefaults:
             if mock_build.called:
                 _, kwargs = mock_build.call_args
                 assert kwargs["video_codec"] == "libx264"
-                assert kwargs["width"] == "1920"
-                assert kwargs["height"] == "1080"
+                # 管道模式不设置 width/height（尺寸在 rawvideo 参数中指定）
+                assert kwargs["width"] == ""
+                assert kwargs["height"] == ""
                 assert kwargs["framerate"] == "60"
 
     def test_video_defaults_codec_to_copy(self):
@@ -166,8 +167,9 @@ class TestStreamControllerSourceDefaults:
             if mock_build.called:
                 _, kwargs = mock_build.call_args
                 assert kwargs["video_codec"] == "copy"
-                assert kwargs["width"] == "1920"
-                assert kwargs["height"] == "1080"
+                # copy 模式不设置 width/height（不能使用滤镜）
+                assert kwargs["width"] == ""
+                assert kwargs["height"] == ""
                 assert kwargs["framerate"] == "30"
 
     def test_rtsp_defaults_codec_to_copy(self):

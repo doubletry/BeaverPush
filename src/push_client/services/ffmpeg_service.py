@@ -114,7 +114,7 @@ class FFmpegWorker(QThread):
             self._process = subprocess.Popen(
                 self._cmd,
                 stdin=subprocess.PIPE if use_pipe else None,
-                stdout=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
@@ -407,7 +407,15 @@ def build_ffmpeg_command(
 
     # ---- 滤镜 ----
     filters = []
-    if width and height:
+    codec = video_codec if video_codec else "libx264"
+
+    # copy 模式不能使用滤镜；管道源(screen/window)尺寸已在输入参数中指定
+    need_scale = (
+        width and height
+        and codec != "copy"
+        and source_type not in ("screen", "window")
+    )
+    if need_scale:
         w_val = int(width) if width.isdigit() else width
         h_val = int(height) if height.isdigit() else height
         if isinstance(w_val, int):

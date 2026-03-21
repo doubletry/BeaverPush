@@ -445,7 +445,10 @@ def capture_screen_frame(x: int, y: int, w: int, h: int) -> bytes | None:
         gdi32.SelectObject(mem_dc, bitmap)
 
         gdi32.BitBlt(mem_dc, 0, 0, w, h, screen_dc, x, y, SRCCOPY)
-        _draw_cursor_on_dc(mem_dc, x, y, w, h)
+        try:
+            _draw_cursor_on_dc(mem_dc, x, y, w, h)
+        except Exception:
+            pass  # 光标绘制失败不影响截图
 
         data = _extract_pixels(mem_dc, bitmap, w, h)
         gdi32.DeleteObject(bitmap)
@@ -503,7 +506,8 @@ class ScreenCaptureFeeder:
             except (BrokenPipeError, OSError):
                 break
             except Exception:
-                break
+                # 截图异常时跳过当前帧，继续尝试
+                pass
 
             elapsed = time.perf_counter() - start_time
             sleep_time = interval - elapsed

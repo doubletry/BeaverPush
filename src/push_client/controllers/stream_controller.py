@@ -190,10 +190,7 @@ class StreamController(QObject):
             if self._source_path.startswith("offset:"):
                 parts = self._source_path.split(":", 1)[1].split(",")
                 if len(parts) == 4:
-                    if not width:
-                        width = parts[2]
-                    if not height:
-                        height = parts[3]
+                    # 管道模式: 尺寸在 rawvideo 输入参数中指定，不设 width/height
                     if not framerate:
                         framerate = str(get_screen_refresh_rate(
                             int(parts[0]), int(parts[1])
@@ -201,14 +198,7 @@ class StreamController(QObject):
         elif self._source_type == "window":
             if not codec:
                 codec = "libx264"
-            if self._source_path.startswith("hwnd:"):
-                from ..services.window_capture import get_window_rect
-                hwnd = int(self._source_path.split(":")[1])
-                _, _, ww, wh = get_window_rect(hwnd)
-                if not width:
-                    width = str(ww)
-                if not height:
-                    height = str(wh)
+            # 管道模式: 尺寸在 rawvideo 输入参数中指定，不设 width/height
             if not framerate:
                 framerate = "30"
         elif self._source_type == "camera":
@@ -218,10 +208,12 @@ class StreamController(QObject):
             info = probe_video_info(self._source_path)
             if not codec and info.get("codec"):
                 codec = "copy"
-            if not width and info.get("width"):
-                width = str(info["width"])
-            if not height and info.get("height"):
-                height = str(info["height"])
+            # copy 模式不需要 width/height（不能使用滤镜）
+            if codec != "copy":
+                if not width and info.get("width"):
+                    width = str(info["width"])
+                if not height and info.get("height"):
+                    height = str(info["height"])
             if not framerate and info.get("framerate"):
                 fr = str(info["framerate"])
                 if "/" in fr:

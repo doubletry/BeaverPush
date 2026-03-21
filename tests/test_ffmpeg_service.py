@@ -119,6 +119,28 @@ class TestBuildFfmpegCommandVideo:
         cv_idx = cmd.index("-c:v")
         assert cmd[cv_idx + 1] == "copy"
 
+    def test_video_copy_no_scale_filter(self):
+        """copy 模式不应产生 -vf scale 滤镜"""
+        cmd = build_ffmpeg_command(
+            source_type="video",
+            source_path="/test.mp4",
+            rtsp_url="rtsp://localhost:8554/c/s",
+            video_codec="copy",
+            width="1920",
+            height="1080",
+        )
+        assert "-vf" not in cmd
+
+    def test_video_copy_no_pix_fmt(self):
+        """copy 模式不应产生 -pix_fmt"""
+        cmd = build_ffmpeg_command(
+            source_type="video",
+            source_path="/test.mp4",
+            rtsp_url="rtsp://localhost:8554/c/s",
+            video_codec="copy",
+        )
+        assert "-pix_fmt" not in cmd
+
     def test_video_with_scale(self):
         cmd = build_ffmpeg_command(
             source_type="video",
@@ -165,6 +187,34 @@ class TestBuildFfmpegCommandUnsupported:
                 source_path="",
                 rtsp_url="rtsp://localhost:8554/c/s",
             )
+
+
+class TestBuildFfmpegCommandScreenNoFilter:
+    """screen/window 管道源不应产生 scale 滤镜"""
+
+    def test_screen_no_scale_filter(self):
+        cmd = build_ffmpeg_command(
+            source_type="screen",
+            source_path="offset:0,0,1920,1080",
+            rtsp_url="rtsp://localhost:8554/c/s",
+            width="1920",
+            height="1080",
+        )
+        assert "-vf" not in cmd
+
+    def test_window_no_scale_filter(self):
+        with mock.patch(
+            "push_client.services.ffmpeg_service.get_window_rect",
+            return_value=(0, 0, 800, 600),
+        ):
+            cmd = build_ffmpeg_command(
+                source_type="window",
+                source_path="hwnd:12345",
+                rtsp_url="rtsp://localhost:8554/c/s",
+                width="800",
+                height="600",
+            )
+        assert "-vf" not in cmd
 
 
 class TestBuildFfmpegCommandEncoding:
