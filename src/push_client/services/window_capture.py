@@ -354,3 +354,158 @@ class WindowCaptureFeeder:
             ]
 
         return bytes(result)
+
+
+# ==================================================================
+#  屏幕捕获（BitBlt 管道模式，避免 gdigrab 鼠标闪烁）
+# ==================================================================
+
+DI_NORMAL = 0x0003
+
+
+class CURSORINFO(ctypes.Structure):
+    _fields_ = [
+        ("cbSize", ctypes.c_uint32),
+        ("flags", ctypes.c_uint32),
+        ("hCursor", ctypes.c_void_p),
+        ("ptScreenPos", ctypes.wintypes.POINT),
+    ]
+
+
+class ICONINFO(ctypes.Structure):
+    _fields_ = [
+        ("fIcon", ctypes.wintypes.BOOL),
+        ("xHotspot", ctypes.wintypes.DWORD),
+        ("yHotspot", ctypes.wintypes.DWORD),
+        ("hbmMask", ctypes.c_void_p),
+        ("hbmColor", ctypes.c_void_p),
+    ]
+
+
+def _draw_cursor_on_dc(mem_dc, region_x: int, region_y: int,
+                        region_w: int, region_h: int):
+    """在内存 DC 上绘制系统光标，确保每帧一致渲染鼠标。"""
+    user32 = ctypes.windll.user32
+    gdi32 = ctypes.windll.gdi32
+
+    ci = CURSORINFO()
+    ci.cbSize = ctypes.sizeof(CURSORINFO)
+
+    if not user32.GetCursorInfo(ctypes.byref(ci)):
+        return
+    if not (ci.flags & 0x00000001) or not ci.hCursor:  # CURSOR_SHOWING
+        return
+
+    cursor_x = ci.ptScreenPos.x - region_x
+    cursor_y = ci.ptScreenPos.y - region_y
+
+    # 获取光标热点偏移
+    icon_info = ICONINFO()
+    if user32.GetIconInfo(ci.hCursor, ctypes.byref(icon_info)):
+        cursor_x -= icon_info.xHotspot
+        cursor_y -= icon_info.yHotspot
+        if icon_info.hbmMask:
+            gdi32.DeleteObject(icon_info.hbmMask)
+        if icon_info.hbmColor:
+            gdi32.DeleteObject(icon_info.hbmColor)
+
+    # 只在捕获区域内绘制
+    if -32 <= cursor_x < region_w and -32 <= cursor_y < region_h:
+        user32.DrawIconEx(
+            mem_dc, cursor_x, cursor_y, ci.hCursor,
+            0, 0, 0, 0, DI_NORMAL,
+        )
+
+
+def capture_screen_frame(x: int, y: int, w: int, h: int) -> bytes | None:
+    """使用 BitBlt 捕获屏幕区域并绘制鼠标光标。
+
+    通过 BitBlt 从屏幕 DC 截取指定区域，然后用 DrawIconEx
+    在每帧上一致地绘制鼠标光标，避免 gdigrab 的鼠标闪烁问题。
+
+    Args:
+        x: 屏幕区域左上角 X 坐标
+        y: 屏幕区域左上角 Y 坐标
+        w: 捕获宽度（像素，应为偶数）
+        h: 捕获高度（像素，应为偶数）
+
+    Returns:
+        BGRA 格式原始像素数据，捕获失败时返回 None。
+    """
+    user32 = ctypes.windll.user32
+    gdi32 = ctypes.windll.gdi32
+
+    screen_dc = user32.GetDC(0)
+    if not screen_dc:
+        return None
+
+    try:
+        mem_dc = gdi32.CreateCompatibleDC(screen_dc)
+        bitmap = gdi32.CreateCompatibleBitmap(screen_dc, w, h)
+        gdi32.SelectObject(mem_dc, bitmap)
+
+        gdi32.BitBlt(mem_dc, 0, 0, w, h, screen_dc, x, y, SRCCOPY)
+        _draw_cursor_on_dc(mem_dc, x, y, w, h)
+
+        data = _extract_pixels(mem_dc, bitmap, w, h)
+        gdi32.DeleteObject(bitmap)
+        gdi32.DeleteDC(mem_dc)
+        return data
+    finally:
+        user32.ReleaseDC(0, screen_dc)
+
+
+class ScreenCaptureFeeder:
+    """持续捕获屏幕区域，通过管道喂给 FFmpeg stdin。
+
+    使用 BitBlt + DrawIconEx 替代 gdigrab，彻底解决鼠标闪烁问题。
+
+    Usage::
+
+        feeder = ScreenCaptureFeeder(x=0, y=0, w=1920, h=1080, fps=30)
+        feeder.start(ffmpeg_process)
+        ...
+        feeder.stop()
+    """
+
+    def __init__(self, x: int, y: int, w: int, h: int, fps: int = 30):
+        self.x = x
+        self.y = y
+        self.w = _make_even(w)
+        self.h = _make_even(h)
+        self.fps = fps
+        self._running = False
+        self._thread: threading.Thread | None = None
+        self._process: subprocess.Popen | None = None
+
+    def start(self, ffmpeg_process: subprocess.Popen):
+        """开始喂帧。"""
+        self._process = ffmpeg_process
+        self._running = True
+        self._thread = threading.Thread(target=self._feed_loop, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        """停止喂帧。"""
+        self._running = False
+        if self._thread:
+            self._thread.join(timeout=3)
+
+    def _feed_loop(self):
+        interval = 1.0 / self.fps
+        while self._running and self._process and self._process.poll() is None:
+            start_time = time.perf_counter()
+            try:
+                data = capture_screen_frame(self.x, self.y, self.w, self.h)
+                if data:
+                    self._process.stdin.write(data)
+                    self._process.stdin.flush()
+            except (BrokenPipeError, OSError):
+                break
+            except Exception:
+                break
+
+            elapsed = time.perf_counter() - start_time
+            sleep_time = interval - elapsed
+            if sleep_time > 0:
+                time.sleep(sleep_time)

@@ -249,8 +249,8 @@ class StreamCardView(QFrame):
         row.addWidget(self._start_btn)
 
         # 停止推流
-        self._stop_btn = QPushButton("■ 停止")
-        self._stop_btn.setFixedWidth(70)
+        self._stop_btn = QPushButton("■ 停止推流")
+        self._stop_btn.setFixedWidth(90)
         self._stop_btn.setEnabled(False)
         self._stop_btn.setStyleSheet(f"""
             QPushButton {{

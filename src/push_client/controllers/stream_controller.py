@@ -20,6 +20,7 @@ from ..models.config import StreamConfig
 from ..services.ffmpeg_service import (
     FFmpegWorker, build_ffmpeg_command, friendly_error,
 )
+from ..services.device_service import probe_video_info, get_screen_refresh_rate
 from ..views.stream_card import StreamCardView
 
 
@@ -36,8 +37,7 @@ class StreamController(QObject):
         card: 关联的卡片 UI 控件。
         channel_index: 通道索引。
         rtsp_server_getter: 返回当前 RTSP 服务器地址的回调。
-        global_defaults_getter: 返回全局默认参数 dict 的回调，
-            包含 ``width`` / ``height`` / ``fps`` / ``bitrate`` 键。
+        client_id_getter: 返回当前客户端 ID 的回调。
         parent: 父 QObject。
     """
 
@@ -48,14 +48,14 @@ class StreamController(QObject):
         card: StreamCardView,
         channel_index: int,
         rtsp_server_getter: callable,
-        global_defaults_getter: callable = None,
+        client_id_getter: callable = None,
         parent: QObject | None = None,
     ):
         super().__init__(parent)
         self._card = card
         self._channel_index = channel_index
         self._rtsp_server_getter = rtsp_server_getter
-        self._global_defaults_getter = global_defaults_getter
+        self._client_id_getter = client_id_getter
         self._worker: FFmpegWorker | None = None
         self._state = StreamState.IDLE
 
@@ -159,6 +159,12 @@ class StreamController(QObject):
             self._card.show_error("请输入流名称")
             return
 
+        # 获取客户端 ID
+        client_id = self._client_id_getter() if self._client_id_getter else ""
+        if not client_id:
+            self._card.show_error("请先配置客户端 ID")
+            return
+
         # ── 源类型格式校验 ──
         if self._source_type == "rtsp" and not self._source_path.startswith("rtsp://"):
             self._card.show_error("RTSP 地址格式不正确，应以 rtsp:// 开头")
@@ -169,26 +175,63 @@ class StreamController(QObject):
                 self._card.show_error("视频文件不存在，请检查路径")
                 return
 
-        rtsp_url = f"{rtsp_server.rstrip('/')}/{self._stream_name}"
+        rtsp_url = f"{rtsp_server.rstrip('/')}/{client_id}/{self._stream_name}"
         codec = self._video_codec if self._video_codec != "自动" else ""
 
-        # ── 合并全局默认参数：通道未设置时使用全局值 ──
+        # ── 根据视频源类型解析默认参数 ──
         width = self._width
         height = self._height
         framerate = self._framerate
         bitrate = self._bitrate
-        if self._global_defaults_getter:
-            defaults = self._global_defaults_getter()
+
+        if self._source_type == "screen":
             if not codec:
-                codec = defaults.get("codec", "")
-            if not width:
-                width = defaults.get("width", "")
-            if not height:
-                height = defaults.get("height", "")
+                codec = "libx264"
+            if self._source_path.startswith("offset:"):
+                parts = self._source_path.split(":", 1)[1].split(",")
+                if len(parts) == 4:
+                    if not width:
+                        width = parts[2]
+                    if not height:
+                        height = parts[3]
+                    if not framerate:
+                        framerate = str(get_screen_refresh_rate(
+                            int(parts[0]), int(parts[1])
+                        ))
+        elif self._source_type == "window":
+            if not codec:
+                codec = "libx264"
+            if self._source_path.startswith("hwnd:"):
+                from ..services.window_capture import get_window_rect
+                hwnd = int(self._source_path.split(":")[1])
+                _, _, ww, wh = get_window_rect(hwnd)
+                if not width:
+                    width = str(ww)
+                if not height:
+                    height = str(wh)
             if not framerate:
-                framerate = defaults.get("fps", "")
-            if not bitrate:
-                bitrate = defaults.get("bitrate", "")
+                framerate = "30"
+        elif self._source_type == "camera":
+            if not codec:
+                codec = "libx264"
+        elif self._source_type == "video":
+            info = probe_video_info(self._source_path)
+            if not codec and info.get("codec"):
+                codec = "copy"
+            if not width and info.get("width"):
+                width = str(info["width"])
+            if not height and info.get("height"):
+                height = str(info["height"])
+            if not framerate and info.get("framerate"):
+                fr = str(info["framerate"])
+                if "/" in fr:
+                    num, den = fr.split("/")
+                    framerate = str(round(int(num) / int(den)))
+                else:
+                    framerate = fr
+        elif self._source_type == "rtsp":
+            if not codec:
+                codec = "copy"
 
         try:
             cmd = build_ffmpeg_command(
@@ -215,6 +258,13 @@ class StreamController(QObject):
             hwnd = int(self._source_path.split(":")[1])
             fps = int(framerate or "30")
             self._worker.set_window_capture(hwnd, fps)
+        elif self._source_type == "screen" and self._source_path.startswith("offset:"):
+            parts = self._source_path.split(":", 1)[1].split(",")
+            if len(parts) == 4:
+                ox, oy = int(parts[0]), int(parts[1])
+                ow, oh = int(parts[2]), int(parts[3])
+                fps = int(framerate or "30")
+                self._worker.set_screen_capture(ox, oy, ow, oh, fps)
 
         # Worker 信号 → Controller → View
         self._worker.status_changed.connect(self._on_worker_status)

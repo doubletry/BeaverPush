@@ -265,3 +265,24 @@ def check_rtsp_reachable(url: str, timeout: int = 5) -> tuple[bool, str]:
         return False, "未找到 ffprobe，请确认 FFmpeg 已安装"
     except Exception as e:
         return False, f"检查失败: {e}"
+
+
+def get_screen_refresh_rate(x: int, y: int) -> int:
+    """获取指定坐标所在屏幕的刷新率。
+
+    Args:
+        x: 屏幕坐标 X。
+        y: 屏幕坐标 Y。
+
+    Returns:
+        刷新率（Hz），找不到时返回 30。
+    """
+    from PySide6.QtWidgets import QApplication
+    from PySide6.QtCore import QPoint
+    app = QApplication.instance()
+    if app:
+        point = QPoint(x, y)
+        for screen in app.screens():
+            if screen.geometry().contains(point):
+                return max(1, round(screen.refreshRate()))
+    return 30

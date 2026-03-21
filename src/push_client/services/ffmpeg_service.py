@@ -35,7 +35,7 @@ import re
 from PySide6.QtCore import QThread, Signal
 
 from .ffmpeg_path import get_ffmpeg, get_ffplay
-from .window_capture import WindowCaptureFeeder, get_window_rect
+from .window_capture import WindowCaptureFeeder, ScreenCaptureFeeder, get_window_rect
 
 
 def _make_even(v: int) -> int:
@@ -73,12 +73,18 @@ class FFmpegWorker(QThread):
         self._process: subprocess.Popen | None = None
         self._preview_process: subprocess.Popen | None = None
         self._capture_feeder: WindowCaptureFeeder | None = None
+        self._screen_feeder: ScreenCaptureFeeder | None = None
         self._stop_flag = False
         self._cmd: list[str] = []
         self._preview_url: str = ""
         self._preview_enabled: bool = False
         self._window_hwnd: int = 0
         self._window_fps: int = 30
+        self._screen_x: int = 0
+        self._screen_y: int = 0
+        self._screen_w: int = 0
+        self._screen_h: int = 0
+        self._screen_fps: int = 30
 
     def set_command(self, cmd: list[str]):
         self._cmd = cmd
@@ -91,12 +97,19 @@ class FFmpegWorker(QThread):
         self._window_hwnd = hwnd
         self._window_fps = fps
 
+    def set_screen_capture(self, x: int, y: int, w: int, h: int, fps: int = 30):
+        self._screen_x = x
+        self._screen_y = y
+        self._screen_w = w
+        self._screen_h = h
+        self._screen_fps = fps
+
     def run(self):
         self._stop_flag = False
         self.status_changed.emit("正在启动推流...")
 
         try:
-            use_pipe = self._window_hwnd != 0
+            use_pipe = self._window_hwnd != 0 or self._screen_w != 0
 
             self._process = subprocess.Popen(
                 self._cmd,
@@ -111,6 +124,13 @@ class FFmpegWorker(QThread):
                     self._window_hwnd, self._window_fps
                 )
                 self._capture_feeder.start(self._process)
+            elif use_pipe and self._screen_w:
+                self._screen_feeder = ScreenCaptureFeeder(
+                    self._screen_x, self._screen_y,
+                    self._screen_w, self._screen_h,
+                    self._screen_fps,
+                )
+                self._screen_feeder.start(self._process)
 
             self.status_changed.emit("推流中")
 
@@ -165,6 +185,9 @@ class FFmpegWorker(QThread):
         if self._capture_feeder:
             self._capture_feeder.stop()
             self._capture_feeder = None
+        if self._screen_feeder:
+            self._screen_feeder.stop()
+            self._screen_feeder = None
         self._stop_preview()
         if self._process and self._process.poll() is None:
             try:
@@ -214,6 +237,9 @@ class FFmpegWorker(QThread):
         if self._capture_feeder:
             self._capture_feeder.stop()
             self._capture_feeder = None
+        if self._screen_feeder:
+            self._screen_feeder.stop()
+            self._screen_feeder = None
         self._stop_preview()
         if self._process:
             try:
@@ -332,25 +358,25 @@ def build_ffmpeg_command(
         cmd += ["-rtsp_transport", "tcp", "-i", source_path]
 
     elif source_type == "screen":
-        # 屏幕捕获：统一使用 offset 参数指定区域
+        # 屏幕捕获：使用 rawvideo 管道模式，通过 BitBlt + DrawIconEx
+        # 替代 gdigrab，彻底解决鼠标闪烁问题
         # source_path 格式: "offset:x,y,w,h"
-        input_args = ["-f", "gdigrab"]
-        if framerate:
-            input_args += ["-framerate", framerate]
-        else:
-            input_args += ["-framerate", "30"]
-
         if source_path.startswith("offset:"):
             parts = source_path.split(":", 1)[1].split(",")
             if len(parts) == 4:
-                ox, oy, ow, oh = parts
-                input_args += [
-                    "-offset_x", ox,
-                    "-offset_y", oy,
-                    "-video_size", f"{ow}x{oh}",
+                ow, oh = int(parts[2]), int(parts[3])
+                w = _make_even(ow)
+                h = _make_even(oh)
+                fps = framerate if framerate else "30"
+                cmd += [
+                    "-f", "rawvideo",
+                    "-pixel_format", "bgra",
+                    "-video_size", f"{w}x{h}",
+                    "-framerate", fps,
+                    "-i", "pipe:0",
                 ]
-        input_args += ["-i", "desktop"]
-        cmd += input_args
+        else:
+            raise ValueError("屏幕捕获源路径格式错误，应为 offset:x,y,w,h")
 
     elif source_type == "window":
         # 窗口捕获：rawvideo 管道
@@ -389,8 +415,6 @@ def build_ffmpeg_command(
         if isinstance(h_val, int):
             h_val = _make_even(h_val)
         filters.append(f"scale={w_val}:{h_val}")
-    elif source_type == "screen":
-        filters.append("scale=trunc(iw/2)*2:trunc(ih/2)*2")
 
     # ---- 编码 ----
     if source_type in ("screen", "window", "camera"):

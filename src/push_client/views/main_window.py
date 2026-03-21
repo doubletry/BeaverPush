@@ -20,11 +20,11 @@ from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QScrollArea,
-    QMessageBox, QComboBox,
+    QMessageBox,
 )
 
 from .theme import Theme
-from .stream_card import StreamCardView, CODEC_OPTIONS
+from .stream_card import StreamCardView
 
 
 class MainWindow(QMainWindow):
@@ -42,12 +42,11 @@ class MainWindow(QMainWindow):
     add_stream_clicked = Signal()
     save_config_clicked = Signal()
     server_changed     = Signal(str)
-    # 全局默认参数变更信号
-    default_codec_changed   = Signal(str)
-    default_width_changed   = Signal(str)
-    default_height_changed  = Signal(str)
-    default_fps_changed     = Signal(str)
-    default_bitrate_changed = Signal(str)
+    # 客户端 ID 变更信号
+    client_id_changed  = Signal(str)
+    # 全部开始/停止推流信号
+    start_all_clicked  = Signal()
+    stop_all_clicked   = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -72,8 +71,8 @@ class MainWindow(QMainWindow):
 
         # ── 顶部工具栏 ──
         root.addLayout(self._build_toolbar())
-        # ── 全局默认参数 ──
-        root.addLayout(self._build_global_defaults())
+        # ── 客户端 ID + 全部开始/停止 ──
+        root.addLayout(self._build_client_row())
         # ── 卡片滚动区域 ──
         root.addWidget(self._build_scroll_area(), 1)
         # ── 底部状态栏 ──
@@ -183,58 +182,52 @@ class MainWindow(QMainWindow):
         """获取 RTSP 服务器地址的锁定状态。"""
         return self._server_input.isReadOnly()
 
-    def _build_global_defaults(self) -> QHBoxLayout:
-        """构建全局默认推流参数行。
-
-        当推流通道中未填写分辨率/帧率/码率时，使用此处的默认值。
-        """
+    def _build_client_row(self) -> QHBoxLayout:
+        """构建客户端 ID 输入 + 全部开始/停止推流按钮行。"""
         row = QHBoxLayout()
         row.setSpacing(8)
 
-        hint_label = QLabel("全局默认:")
-        hint_label.setStyleSheet(f"color: {Theme.SUBTEXT0};")
-        hint_label.setToolTip("未在通道中单独设置时，使用此处的默认参数")
-        row.addWidget(hint_label)
-
-        row.addWidget(QLabel("编码:"))
-        self._default_codec_combo = QComboBox()
-        self._default_codec_combo.setFixedWidth(110)
-        self._default_codec_combo.addItems(CODEC_OPTIONS)
-        self._default_codec_combo.currentTextChanged.connect(
-            self.default_codec_changed.emit
-        )
-        row.addWidget(self._default_codec_combo)
-
-        row.addWidget(QLabel("分辨率:"))
-        self._default_width_input = QLineEdit()
-        self._default_width_input.setPlaceholderText("宽")
-        self._default_width_input.setFixedWidth(55)
-        self._default_width_input.textChanged.connect(self.default_width_changed.emit)
-        row.addWidget(self._default_width_input)
-
-        row.addWidget(QLabel("x"))
-
-        self._default_height_input = QLineEdit()
-        self._default_height_input.setPlaceholderText("高")
-        self._default_height_input.setFixedWidth(55)
-        self._default_height_input.textChanged.connect(self.default_height_changed.emit)
-        row.addWidget(self._default_height_input)
-
-        row.addWidget(QLabel("帧率:"))
-        self._default_fps_input = QLineEdit()
-        self._default_fps_input.setPlaceholderText("30")
-        self._default_fps_input.setFixedWidth(50)
-        self._default_fps_input.textChanged.connect(self.default_fps_changed.emit)
-        row.addWidget(self._default_fps_input)
-
-        row.addWidget(QLabel("码率:"))
-        self._default_bitrate_input = QLineEdit()
-        self._default_bitrate_input.setPlaceholderText("如 2M")
-        self._default_bitrate_input.setFixedWidth(60)
-        self._default_bitrate_input.textChanged.connect(self.default_bitrate_changed.emit)
-        row.addWidget(self._default_bitrate_input)
+        row.addWidget(QLabel("客户端 ID:"))
+        self._client_id_input = QLineEdit()
+        self._client_id_input.setPlaceholderText("如 client01")
+        self._client_id_input.setFixedWidth(160)
+        self._client_id_input.textChanged.connect(self.client_id_changed.emit)
+        row.addWidget(self._client_id_input)
 
         row.addStretch()
+
+        # 全部开始推流
+        self._start_all_btn = QPushButton("▶ 全部开始推流")
+        self._start_all_btn.setFixedWidth(120)
+        self._start_all_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {Theme.GREEN};
+                color: {Theme.BASE};
+                font-weight: bold;
+                border: 1px solid {Theme.GREEN};
+                border-radius: {Theme.RADIUS_NORMAL}px;
+            }}
+            QPushButton:hover {{ background-color: {Theme.TEAL}; }}
+        """)
+        self._start_all_btn.clicked.connect(self.start_all_clicked.emit)
+        row.addWidget(self._start_all_btn)
+
+        # 全部停止推流
+        self._stop_all_btn = QPushButton("■ 全部停止推流")
+        self._stop_all_btn.setFixedWidth(120)
+        self._stop_all_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {Theme.RED};
+                color: {Theme.BASE};
+                font-weight: bold;
+                border: 1px solid {Theme.RED};
+                border-radius: {Theme.RADIUS_NORMAL}px;
+            }}
+            QPushButton:hover {{ background-color: {Theme.MAROON}; }}
+        """)
+        self._stop_all_btn.clicked.connect(self.stop_all_clicked.emit)
+        row.addWidget(self._stop_all_btn)
+
         return row
 
     def _build_scroll_area(self) -> QScrollArea:
@@ -309,49 +302,15 @@ class MainWindow(QMainWindow):
         self._test_btn.setEnabled(not testing)
         self._test_btn.setText("测试中..." if testing else "测试连接")
 
-    # ── 全局默认参数 ──
+    # ── 客户端 ID ──
 
-    def get_default_codec(self) -> str:
-        return self._default_codec_combo.currentText()
+    def get_client_id(self) -> str:
+        return self._client_id_input.text()
 
-    def set_default_codec(self, codec: str):
-        idx = self._default_codec_combo.findText(codec)
-        if idx >= 0:
-            self._default_codec_combo.blockSignals(True)
-            self._default_codec_combo.setCurrentIndex(idx)
-            self._default_codec_combo.blockSignals(False)
-
-    def get_default_width(self) -> str:
-        return self._default_width_input.text()
-
-    def set_default_width(self, w: str):
-        self._default_width_input.blockSignals(True)
-        self._default_width_input.setText(w)
-        self._default_width_input.blockSignals(False)
-
-    def get_default_height(self) -> str:
-        return self._default_height_input.text()
-
-    def set_default_height(self, h: str):
-        self._default_height_input.blockSignals(True)
-        self._default_height_input.setText(h)
-        self._default_height_input.blockSignals(False)
-
-    def get_default_fps(self) -> str:
-        return self._default_fps_input.text()
-
-    def set_default_fps(self, fps: str):
-        self._default_fps_input.blockSignals(True)
-        self._default_fps_input.setText(fps)
-        self._default_fps_input.blockSignals(False)
-
-    def get_default_bitrate(self) -> str:
-        return self._default_bitrate_input.text()
-
-    def set_default_bitrate(self, br: str):
-        self._default_bitrate_input.blockSignals(True)
-        self._default_bitrate_input.setText(br)
-        self._default_bitrate_input.blockSignals(False)
+    def set_client_id(self, cid: str):
+        self._client_id_input.blockSignals(True)
+        self._client_id_input.setText(cid)
+        self._client_id_input.blockSignals(False)
 
     def add_card(self, card: StreamCardView):
         """向卡片列表添加一张卡片。"""

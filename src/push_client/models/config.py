@@ -68,21 +68,13 @@ class AppConfig:
     Attributes:
         rtsp_server:     RTSP 服务器地址（如 ``"rtsp://192.168.1.100:8554"``）
         server_locked:   RTSP 服务器地址是否锁定
-        default_codec:   全局默认编码器（空字符串表示自动）
-        default_width:   全局默认输出宽度
-        default_height:  全局默认输出高度
-        default_fps:     全局默认帧率
-        default_bitrate: 全局默认码率（如 ``"2M"``）
+        client_id:       客户端 ID，所有通道共享
         streams:         推流通道配置列表，每个元素为 :class:`StreamConfig` 的字典形式
     """
 
     rtsp_server: str = ""
     server_locked: bool = False
-    default_codec: str = ""
-    default_width: str = ""
-    default_height: str = ""
-    default_fps: str = ""
-    default_bitrate: str = ""
+    client_id: str = ""
     streams: list[dict] = field(default_factory=list)
 
     def add_stream(self, cfg: StreamConfig):
@@ -103,11 +95,7 @@ def load_config() -> AppConfig:
             return AppConfig(
                 rtsp_server=data.get("rtsp_server", ""),
                 server_locked=data.get("server_locked", False),
-                default_codec=data.get("default_codec", ""),
-                default_width=data.get("default_width", ""),
-                default_height=data.get("default_height", ""),
-                default_fps=data.get("default_fps", ""),
-                default_bitrate=data.get("default_bitrate", ""),
+                client_id=data.get("client_id", ""),
                 streams=data.get("streams", []),
             )
         except Exception:

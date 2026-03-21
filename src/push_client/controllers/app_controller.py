@@ -53,22 +53,14 @@ class AppController(QObject):
         self._config = load_config()
         self._rtsp_server = self._config.rtsp_server
         self._server_locked = self._config.server_locked
-        self._default_codec = self._config.default_codec
-        self._default_width = self._config.default_width
-        self._default_height = self._config.default_height
-        self._default_fps = self._config.default_fps
-        self._default_bitrate = self._config.default_bitrate
+        self._client_id = self._config.client_id
         self._controllers: list[StreamController] = []
         self._tray: QSystemTrayIcon | None = None
 
         # 同步初始状态到 View
         self._window.set_server(self._rtsp_server)
         self._window.set_server_locked(self._server_locked)
-        self._window.set_default_codec(self._default_codec or "自动")
-        self._window.set_default_width(self._default_width)
-        self._window.set_default_height(self._default_height)
-        self._window.set_default_fps(self._default_fps)
-        self._window.set_default_bitrate(self._default_bitrate)
+        self._window.set_client_id(self._client_id)
 
         # 连接 View 信号 → Controller
         self._connect_signals()
@@ -87,12 +79,11 @@ class AppController(QObject):
         w.test_clicked.connect(self._on_test)
         w.add_stream_clicked.connect(self.add_stream)
         w.save_config_clicked.connect(self.save_config)
-        # 全局默认参数
-        w.default_codec_changed.connect(self._on_default_codec)
-        w.default_width_changed.connect(self._on_default_width)
-        w.default_height_changed.connect(self._on_default_height)
-        w.default_fps_changed.connect(self._on_default_fps)
-        w.default_bitrate_changed.connect(self._on_default_bitrate)
+        # 客户端 ID
+        w.client_id_changed.connect(self._on_client_id_changed)
+        # 全部开始/停止
+        w.start_all_clicked.connect(self._on_start_all)
+        w.stop_all_clicked.connect(self._on_stop_all)
 
         # 替换窗口的 closeEvent
         w.closeEvent = self._on_close
@@ -105,30 +96,27 @@ class AppController(QObject):
         """用户修改 RTSP 服务器地址。"""
         self._rtsp_server = url
 
-    def _on_default_codec(self, codec: str):
-        self._default_codec = codec if codec != "自动" else ""
+    def _on_client_id_changed(self, cid: str):
+        """用户修改客户端 ID。"""
+        self._client_id = cid
 
-    def _on_default_width(self, w: str):
-        self._default_width = w
+    def _on_start_all(self):
+        """全部开始推流。"""
+        started = 0
+        for ctrl in self._controllers:
+            if not ctrl.is_streaming:
+                ctrl.start_stream()
+                started += 1
+        self._window.set_status(f"已启动 {started} 路推流")
 
-    def _on_default_height(self, h: str):
-        self._default_height = h
-
-    def _on_default_fps(self, fps: str):
-        self._default_fps = fps
-
-    def _on_default_bitrate(self, br: str):
-        self._default_bitrate = br
-
-    def _get_global_defaults(self) -> dict:
-        """返回当前全局默认推流参数。"""
-        return {
-            "codec": self._default_codec,
-            "width": self._default_width,
-            "height": self._default_height,
-            "fps": self._default_fps,
-            "bitrate": self._default_bitrate,
-        }
+    def _on_stop_all(self):
+        """全部停止推流。"""
+        stopped = 0
+        for ctrl in self._controllers:
+            if ctrl.is_streaming:
+                ctrl.stop_stream()
+                stopped += 1
+        self._window.set_status(f"已停止 {stopped} 路推流")
 
     def _on_test(self):
         """测试 RTSP 服务器连接。
@@ -210,7 +198,7 @@ class AppController(QObject):
             card=card,
             channel_index=channel_index,
             rtsp_server_getter=lambda: self._rtsp_server,
-            global_defaults_getter=self._get_global_defaults,
+            client_id_getter=lambda: self._client_id,
             parent=self,
         )
         self._controllers.append(ctrl)
@@ -303,11 +291,7 @@ class AppController(QObject):
         cfg = AppConfig(
             rtsp_server=self._rtsp_server,
             server_locked=self._server_locked,
-            default_codec=self._default_codec,
-            default_width=self._default_width,
-            default_height=self._default_height,
-            default_fps=self._default_fps,
-            default_bitrate=self._default_bitrate,
+            client_id=self._client_id,
             streams=[],
         )
         for ctrl in self._controllers:
