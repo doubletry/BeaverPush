@@ -12,8 +12,8 @@
 #ifndef MyAppVersion
   #define MyAppVersion "0.1.0"
 #endif
-#define MyAppPublisher "YiSheng, Inc."
-#define MyAppURL "https://www.yisheng.fun/"
+#define MyAppPublisher "Company, Inc."
+#define MyAppURL "https://www.company.com/"
 #define MyAppExeName "BeaverPush.exe"
 
 [Setup]

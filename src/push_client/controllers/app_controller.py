@@ -18,9 +18,9 @@ from __future__ import annotations
 
 import subprocess
 
-from PySide6.QtCore import QObject, QTimer
+from PySide6.QtCore import QObject, QTimer, Qt
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
-from PySide6.QtGui import QAction, QCloseEvent, QIcon
+from PySide6.QtGui import QAction, QCloseEvent, QIcon, QPixmap
 
 from .. import APP_NAME, APP_ICON_PATH
 from ..models.config import (
@@ -348,7 +348,16 @@ class AppController(QObject):
 
     def setup_tray(self):
         """创建并显示系统托盘图标和右键菜单。"""
+        # 从 ico 文件加载后，补充系统托盘需要的小尺寸 pixmap
         icon = QIcon(APP_ICON_PATH)
+        if not icon.isNull():
+            for size in (16, 24, 32, 48):
+                pm = QPixmap(APP_ICON_PATH).scaled(
+                    size, size,
+                    aspectMode=Qt.AspectRatioMode.KeepAspectRatio,
+                    mode=Qt.TransformationMode.SmoothTransformation,
+                )
+                icon.addPixmap(pm)
 
         self._tray = QSystemTrayIcon(icon, self._app)
         self._tray.setToolTip(APP_NAME)

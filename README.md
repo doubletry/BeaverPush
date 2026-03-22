@@ -1,84 +1,149 @@
-# PushClient — RTSP 推流客户端
+# BeaverPush — Multi-Channel RTSP Streaming Client
 
-基于 **PySide6 QWidgets + MVC 架构** 的多路 RTSP 推流桌面客户端。
+[中文文档](README_zh.md)
 
-## 功能
+A multi-channel RTSP streaming desktop client built with **PySide6 + MVC architecture** on Windows.
 
-- 🎥 支持 5 种视频源：本地视频、摄像头、RTSP 拉流、屏幕捕获、窗口捕获
-- 📡 多路同时推流，每路独立控制启停
-- 🎨 Catppuccin Mocha 暗色主题
-- 🔧 编码参数可配（编码器、分辨率、帧率、码率）
-- 💾 配置自动持久化（JSON）
-- 👁️ 可选 ffplay 实时预览
-- 🖥️ 系统托盘最小化
+## Features
 
-## 前置依赖
+- 🎥 **5 video source types:** local video files, cameras, RTSP pull-to-push, screen capture, window capture
+- 📡 **Multi-channel streaming** with independent start/stop control per channel
+- 🎨 **Catppuccin Mocha** dark theme
+- 🔧 **Configurable encoding:** codec (h264/h265/NVENC), resolution, framerate, bitrate
+- 💾 **Auto-persistent configuration** (JSON)
+- 👁️ **Live preview** via ffplay
+- 🖥️ **System tray** minimize support
+- 🔒 **Server lock** to prevent accidental RTSP address changes
+- 🔄 **Loop playback** for local video files
+- 🖱️ **Editable channel names** with click-to-edit titles
+
+## Download
+
+Download the latest installer from [GitHub Releases](https://github.com/doubletry/push_client/releases). The installer bundles FFmpeg — no additional setup required.
+
+## Development Setup
+
+### Prerequisites
 
 - **Python** ≥ 3.12
-- **FFmpeg** / **ffprobe** / **ffplay** 在 `PATH` 中
-- **Poetry** 包管理器
+- **FFmpeg** / **ffprobe** / **ffplay** in `PATH` (or place them in a `ffmpeg/` subdirectory)
+- **Poetry** package manager
 
-## 安装与运行
+### Install & Run
 
 ```bash
-# 安装依赖
+# Install dependencies
 poetry install
 
-# 运行
+# Run the application
 poetry run push-client
-# 或
+# or
 poetry run python -m push_client.main
 ```
 
-## 项目结构
+### Run Tests
+
+```bash
+poetry run pytest
+```
+
+### Build from Source
+
+Build a standalone executable and Windows installer:
+
+```powershell
+# Build executable + installer (requires Inno Setup 6)
+.\build.ps1 -Version "1.0.0"
+```
+
+The build script uses **Nuitka** to compile a standalone executable (`dist/main.dist/BeaverPush.exe`) and **Inno Setup** to create the installer (`dist/BeaverPushSetup.exe`).
+
+## Usage
+
+1. Enter the RTSP server address (e.g. `rtsp://192.168.1.100:8554`)
+2. Set a Client ID to identify this streaming endpoint
+3. Click **Add Channel** to create a streaming channel
+4. Select a video source type and configure parameters
+5. Click **Start** to begin streaming
+
+### Video Source Types
+
+| Source | Description |
+|--------|-------------|
+| Local Video | Stream a video file (supports loop playback) |
+| Camera | Stream from a DirectShow camera device |
+| RTSP | Pull from an RTSP source and re-push |
+| Screen | Capture a display/monitor region |
+| Window | Capture a specific application window |
+
+### Advanced Settings
+
+Toggle **Advanced** mode on a channel card to configure:
+- **Codec:** libx264, h264_nvenc, hevc_nvenc, copy
+- **Resolution:** Width × Height (auto-adjusted to even numbers)
+- **Framerate** and **Bitrate** (Kbps / Mbps)
+
+## Project Structure
 
 ```
 src/push_client/
-├── main.py                     # 应用入口
-├── models/                     # 数据层
-│   ├── config.py               #   配置持久化 (JSON)
-│   └── stream_model.py         #   推流状态枚举
-├── views/                      # 视图层 (QWidgets)
-│   ├── theme.py                #   Catppuccin Mocha 主题 + QSS
-│   ├── stream_card.py          #   推流通道卡片组件
-│   └── main_window.py          #   主窗口 (工具栏 + 滚动列表)
-├── controllers/                # 控制层
-│   ├── app_controller.py       #   全局控制 (托盘/配置/设备枚举/退出)
-│   └── stream_controller.py    #   单路推流控制 (FFmpeg 生命周期)
-└── services/                   # 服务层 (纯业务逻辑)
-    ├── device_service.py       #   设备枚举 (摄像头/屏幕/窗口)
-    ├── ffmpeg_service.py       #   FFmpeg 进程管理 + 命令构建
-    └── window_capture.py       #   Win32 窗口捕获 (PrintWindow/BitBlt)
+├── main.py                      # Application entry point
+├── models/
+│   ├── config.py                # JSON config persistence (AppConfig, StreamConfig)
+│   └── stream_model.py          # StreamState enum
+├── views/
+│   ├── theme.py                 # Catppuccin Mocha theme + QSS
+│   ├── stream_card.py           # Stream channel card widget
+│   └── main_window.py           # Main window (toolbar + scrollable card list)
+├── controllers/
+│   ├── app_controller.py        # App lifecycle, config, device enumeration
+│   └── stream_controller.py     # Single channel FFmpeg lifecycle
+└── services/
+    ├── device_service.py        # Device enumeration (cameras/screens/windows)
+    ├── ffmpeg_service.py        # FFmpeg process management + command building
+    ├── ffmpeg_path.py           # FFmpeg executable path resolution
+    ├── log_service.py           # Loguru-based logging
+    └── window_capture.py        # Win32 window/screen capture (PrintWindow/BitBlt)
 ```
 
-## 架构
+## Architecture
 
 ```
-┌─────────────────────────────────────────────┐
-│                    Views                     │
-│  MainWindow ◄──── StreamCardView (×N)        │
-│  (信号 emit)      (信号 emit)                │
-└──────┬──────────────────┬────────────────────┘
+┌───────────────────────────────────────────────┐
+│                     Views                      │
+│  MainWindow ◄──── StreamCardView (×N)          │
+│  (Qt signals)     (Qt signals)                 │
+└──────┬──────────────────┬──────────────────────┘
        │                  │
        ▼                  ▼
-┌──────────────┐  ┌────────────────┐
-│AppController │  │StreamController│  ← Controllers
-│ (全局管理)    │  │ (单路推流)      │
-└──────┬───────┘  └───────┬────────┘
-       │                  │
-       ▼                  ▼
-┌─────────────────────────────────────────────┐
-│              Models + Services               │
-│  config.py  stream_model.py  device_service  │
-│  ffmpeg_service  window_capture              │
-└─────────────────────────────────────────────┘
+┌──────────────┐  ┌─────────────────┐
+│AppController │  │StreamController │  ← Controllers
+│ (global)     │  │ (per channel)   │
+└──────┬───────┘  └────────┬────────┘
+       │                   │
+       ▼                   ▼
+┌───────────────────────────────────────────────┐
+│              Models + Services                 │
+│  config · stream_model · device_service        │
+│  ffmpeg_service · ffmpeg_path · window_capture │
+└───────────────────────────────────────────────┘
 ```
 
-- **Views** 只负责 UI 展示，通过 Qt 信号通知用户操作
-- **Controllers** 连接信号、调用 Services、更新 Views 的 `set_*` 方法
-- **Services** 封装纯业务逻辑（FFmpeg 进程、设备枚举、窗口捕获）
-- **Models** 定义数据结构和持久化
+- **Views** — UI rendering only; emit Qt signals for user actions
+- **Controllers** — Connect signals, call services, update views via `set_*` methods
+- **Services** — Pure business logic (FFmpeg process, device enumeration, window capture)
+- **Models** — Data structures and persistence
 
-## 许可
+## CI/CD
+
+Automated builds are triggered by pushing a version tag (e.g. `v1.0.0`). The GitHub Actions workflow:
+
+1. Sets up Python 3.12 + Poetry
+2. Downloads FFmpeg binaries
+3. Installs Inno Setup 6
+4. Compiles with Nuitka and packages the installer
+5. Runs a silent install verification test
+
+## License
 
 MIT
