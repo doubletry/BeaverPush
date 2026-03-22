@@ -268,7 +268,7 @@ class StreamCardView(QFrame):
         self._bitrate_unit_combo = QComboBox()
         self._bitrate_unit_combo.addItems(["K", "M"])
         self._bitrate_unit_combo.setCurrentText("M")
-        self._bitrate_unit_combo.setFixedWidth(45)
+        self._bitrate_unit_combo.setFixedWidth(55)
         row.addWidget(self._bitrate_unit_combo)
 
         row.addStretch()
