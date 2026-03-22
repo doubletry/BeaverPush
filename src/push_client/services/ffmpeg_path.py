@@ -26,14 +26,9 @@ def _app_dir() -> str:
     """获取应用程序所在目录。
 
     打包后 (Nuitka standalone) ``sys.argv[0]`` 指向 exe 所在目录；
-    开发模式下返回项目根目录（src 的上一级）。
+    开发模式下同样使用 ``sys.argv[0]`` 所在目录。
     """
-    if getattr(sys, "frozen", False) or "__compiled__" in dir():
-        # Nuitka standalone 模式
-        return os.path.dirname(os.path.abspath(sys.argv[0]))
-    else:
-        # 开发模式：当前文件在 src/push_client/services/
-        return os.path.dirname(os.path.abspath(sys.argv[0]))
+    return os.path.dirname(os.path.abspath(sys.argv[0]))
 
 
 def _find_executable(name: str) -> str:

@@ -14,9 +14,7 @@ Catppuccin Mocha 深色主题
 
 from __future__ import annotations
 
-from pathlib import Path
-
-_ASSETS_DIR = Path(__file__).resolve().parent.parent.parent.parent / "assets"
+from .. import ASSETS_DIR as _ASSETS_DIR
 
 
 class Theme:
