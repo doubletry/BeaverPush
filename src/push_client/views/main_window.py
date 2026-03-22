@@ -50,7 +50,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("RTSP 推流客户端")
+        self.setWindowTitle("BeaverPush - 河狸推流")
         self.resize(1100, 650)
         self.setMinimumSize(900, 400)
 
@@ -62,38 +62,46 @@ class MainWindow(QMainWindow):
     # ==================================================================
 
     def _build_ui(self):
-        """构建主窗口布局：工具栏 + 全局参数 + 卡片列表 + 状态栏。"""
+        """构建主窗口布局：工具栏 + 卡片列表 + 状态栏。"""
         central = QWidget()
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
         root.setContentsMargins(16, 16, 16, 16)
         root.setSpacing(12)
 
-        # ── 顶部工具栏 ──
+        # ── 顶部工具栏第 1 行：RTSP + 客户端 ID + 锁定 ──
         root.addLayout(self._build_toolbar())
-        # ── 客户端 ID + 全部开始/停止 ──
-        root.addLayout(self._build_client_row())
+        # ── 顶部工具栏第 2 行：功能按钮 ──
+        root.addLayout(self._build_action_bar())
         # ── 卡片滚动区域 ──
         root.addWidget(self._build_scroll_area(), 1)
         # ── 底部状态栏 ──
         root.addWidget(self._build_status_bar())
 
     def _build_toolbar(self) -> QHBoxLayout:
-        """构建顶部工具栏。"""
+        """构建顶部工具栏：RTSP 服务器 + 客户端 ID + 锁定按钮。"""
         toolbar = QHBoxLayout()
         toolbar.setSpacing(10)
 
-        toolbar.addWidget(QLabel("RTSP 服务器地址:"))
+        toolbar.addWidget(QLabel("RTSP 服务器:"))
 
         self._server_input = QLineEdit()
         self._server_input.setPlaceholderText("如 rtsp://192.168.1.100:8554")
         self._server_input.textChanged.connect(self.server_changed.emit)
         toolbar.addWidget(self._server_input, 1)
 
-        # 锁定/解锁 RTSP 地址
+        toolbar.addWidget(QLabel("客户端 ID:"))
+
+        self._client_id_input = QLineEdit()
+        self._client_id_input.setPlaceholderText("如 client01")
+        self._client_id_input.setFixedWidth(160)
+        self._client_id_input.textChanged.connect(self.client_id_changed.emit)
+        toolbar.addWidget(self._client_id_input)
+
+        # 锁定/解锁 RTSP 地址和客户端 ID
         self._lock_btn = QPushButton("🔓")
         self._lock_btn.setFixedWidth(36)
-        self._lock_btn.setToolTip("锁定 RTSP 地址，防止误修改")
+        self._lock_btn.setToolTip("锁定 RTSP 地址和客户端 ID，防止误修改")
         self._lock_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: {Theme.SURFACE1};
@@ -105,6 +113,13 @@ class MainWindow(QMainWindow):
         """)
         self._lock_btn.clicked.connect(self._toggle_server_lock)
         toolbar.addWidget(self._lock_btn)
+
+        return toolbar
+
+    def _build_action_bar(self) -> QHBoxLayout:
+        """构建功能按钮行：测试连接、添加通道、保存配置、全部开始/停止。"""
+        bar = QHBoxLayout()
+        bar.setSpacing(10)
 
         # 测试连接
         self._test_btn = QPushButton("测试连接")
@@ -120,7 +135,7 @@ class MainWindow(QMainWindow):
             QPushButton:hover {{ background-color: {Theme.LAVENDER}; }}
         """)
         self._test_btn.clicked.connect(self.test_clicked.emit)
-        toolbar.addWidget(self._test_btn)
+        bar.addWidget(self._test_btn)
 
         # 添加通道
         add_btn = QPushButton("＋ 添加通道")
@@ -136,7 +151,7 @@ class MainWindow(QMainWindow):
             QPushButton:hover {{ background-color: {Theme.SAPPHIRE}; }}
         """)
         add_btn.clicked.connect(self.add_stream_clicked.emit)
-        toolbar.addWidget(add_btn)
+        bar.addWidget(add_btn)
 
         # 保存配置
         save_btn = QPushButton("💾 保存配置")
@@ -152,49 +167,9 @@ class MainWindow(QMainWindow):
             QPushButton:hover {{ background-color: {Theme.PINK}; }}
         """)
         save_btn.clicked.connect(self.save_config_clicked.emit)
-        toolbar.addWidget(save_btn)
+        bar.addWidget(save_btn)
 
-        return toolbar
-
-    def _toggle_server_lock(self):
-        """切换 RTSP 服务器地址的锁定/解锁状态。"""
-        self.set_server_locked(not self._server_input.isReadOnly())
-
-    def set_server_locked(self, locked: bool):
-        """设置 RTSP 服务器地址的锁定状态。
-
-        Args:
-            locked: ``True`` 表示锁定（只读）。
-        """
-        self._server_input.setReadOnly(locked)
-        if locked:
-            self._lock_btn.setText("🔒")
-            self._lock_btn.setToolTip("点击解锁 RTSP 地址")
-            self._server_input.setStyleSheet(
-                f"background-color: {Theme.CRUST}; color: {Theme.SUBTEXT0};"
-            )
-        else:
-            self._lock_btn.setText("🔓")
-            self._lock_btn.setToolTip("锁定 RTSP 地址，防止误修改")
-            self._server_input.setStyleSheet("")
-
-    def get_server_locked(self) -> bool:
-        """获取 RTSP 服务器地址的锁定状态。"""
-        return self._server_input.isReadOnly()
-
-    def _build_client_row(self) -> QHBoxLayout:
-        """构建客户端 ID 输入 + 全部开始/停止推流按钮行。"""
-        row = QHBoxLayout()
-        row.setSpacing(8)
-
-        row.addWidget(QLabel("客户端 ID:"))
-        self._client_id_input = QLineEdit()
-        self._client_id_input.setPlaceholderText("如 client01")
-        self._client_id_input.setFixedWidth(160)
-        self._client_id_input.textChanged.connect(self.client_id_changed.emit)
-        row.addWidget(self._client_id_input)
-
-        row.addStretch()
+        bar.addStretch()
 
         # 全部开始推流
         self._start_all_btn = QPushButton("▶ 全部开始推流")
@@ -210,7 +185,7 @@ class MainWindow(QMainWindow):
             QPushButton:hover {{ background-color: {Theme.TEAL}; }}
         """)
         self._start_all_btn.clicked.connect(self.start_all_clicked.emit)
-        row.addWidget(self._start_all_btn)
+        bar.addWidget(self._start_all_btn)
 
         # 全部停止推流
         self._stop_all_btn = QPushButton("■ 全部停止推流")
@@ -226,9 +201,37 @@ class MainWindow(QMainWindow):
             QPushButton:hover {{ background-color: {Theme.MAROON}; }}
         """)
         self._stop_all_btn.clicked.connect(self.stop_all_clicked.emit)
-        row.addWidget(self._stop_all_btn)
+        bar.addWidget(self._stop_all_btn)
 
-        return row
+        return bar
+
+    def _toggle_server_lock(self):
+        """切换 RTSP 服务器地址和客户端 ID 的锁定/解锁状态。"""
+        self.set_server_locked(not self._server_input.isReadOnly())
+
+    def set_server_locked(self, locked: bool):
+        """设置 RTSP 服务器地址和客户端 ID 的锁定状态。
+
+        Args:
+            locked: ``True`` 表示锁定（只读）。
+        """
+        locked_style = f"background-color: {Theme.CRUST}; color: {Theme.SUBTEXT0};"
+        self._server_input.setReadOnly(locked)
+        self._client_id_input.setReadOnly(locked)
+        if locked:
+            self._lock_btn.setText("🔒")
+            self._lock_btn.setToolTip("点击解锁 RTSP 地址和客户端 ID")
+            self._server_input.setStyleSheet(locked_style)
+            self._client_id_input.setStyleSheet(locked_style)
+        else:
+            self._lock_btn.setText("🔓")
+            self._lock_btn.setToolTip("锁定 RTSP 地址和客户端 ID，防止误修改")
+            self._server_input.setStyleSheet("")
+            self._client_id_input.setStyleSheet("")
+
+    def get_server_locked(self) -> bool:
+        """获取 RTSP 服务器地址的锁定状态。"""
+        return self._server_input.isReadOnly()
 
     def _build_scroll_area(self) -> QScrollArea:
         """构建可滚动的卡片容器。"""

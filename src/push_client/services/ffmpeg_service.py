@@ -369,6 +369,7 @@ def build_ffmpeg_command(
                 h = _make_even(oh)
                 fps = framerate if framerate else "30"
                 cmd += [
+                    "-use_wallclock_as_timestamps", "1",
                     "-f", "rawvideo",
                     "-pixel_format", "bgra",
                     "-video_size", f"{w}x{h}",
@@ -387,6 +388,7 @@ def build_ffmpeg_command(
             h = _make_even(h)
             fps = framerate if framerate else "30"
             cmd += [
+                "-use_wallclock_as_timestamps", "1",
                 "-f", "rawvideo",
                 "-pixel_format", "bgra",
                 "-video_size", f"{w}x{h}",

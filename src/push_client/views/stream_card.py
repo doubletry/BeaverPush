@@ -190,10 +190,10 @@ class StreamCardView(QFrame):
         row.addWidget(QLabel("流名称:"))
         self._stream_name_input = QLineEdit()
         self._stream_name_input.setPlaceholderText("如 stream1")
-        self._stream_name_input.setFixedWidth(120)
-        row.addWidget(self._stream_name_input)
+        row.addWidget(self._stream_name_input, 1)
 
         # 配置模式切换
+        row.addWidget(QLabel("配置:"))
         self._settings_combo = QComboBox()
         self._settings_combo.setFixedWidth(100)
         self._settings_combo.addItems(["基本设置", "高级设置"])
@@ -202,7 +202,6 @@ class StreamCardView(QFrame):
         self._preview_check = QCheckBox("预览")
         row.addWidget(self._preview_check)
 
-        row.addStretch()
         return row
 
     def _build_advanced_panel(self) -> QWidget:

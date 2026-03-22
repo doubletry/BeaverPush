@@ -81,6 +81,19 @@ class TestBuildFfmpegCommandScreen:
                 rtsp_url="rtsp://localhost:8554/c/s",
             )
 
+    def test_screen_uses_wallclock_timestamps(self):
+        cmd = build_ffmpeg_command(
+            source_type="screen",
+            source_path="offset:0,0,1920,1080",
+            rtsp_url="rtsp://localhost:8554/c/s",
+        )
+        assert "-use_wallclock_as_timestamps" in cmd
+        idx = cmd.index("-use_wallclock_as_timestamps")
+        assert cmd[idx + 1] == "1"
+        # wallclock flag 应出现在 -i pipe:0 之前
+        pipe_idx = cmd.index("pipe:0")
+        assert idx < pipe_idx
+
 
 class TestBuildFfmpegCommandWindow:
     def test_window_uses_rawvideo_pipe(self):
@@ -95,6 +108,22 @@ class TestBuildFfmpegCommandWindow:
             )
         assert "rawvideo" in cmd
         assert "pipe:0" in cmd
+
+    def test_window_uses_wallclock_timestamps(self):
+        with mock.patch(
+            "push_client.services.ffmpeg_service.get_window_rect",
+            return_value=(0, 0, 800, 600),
+        ):
+            cmd = build_ffmpeg_command(
+                source_type="window",
+                source_path="hwnd:12345",
+                rtsp_url="rtsp://localhost:8554/c/s",
+            )
+        assert "-use_wallclock_as_timestamps" in cmd
+        idx = cmd.index("-use_wallclock_as_timestamps")
+        assert cmd[idx + 1] == "1"
+        pipe_idx = cmd.index("pipe:0")
+        assert idx < pipe_idx
 
 
 class TestBuildFfmpegCommandVideo:
