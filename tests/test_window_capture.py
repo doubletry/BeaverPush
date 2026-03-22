@@ -170,7 +170,10 @@ class TestCursorDrawingResilience:
         ):
             feeder.start(mock_process)
             # 等待 feeder 线程自行退出（连续错误达到阈值后会 break）
-            feeder._thread.join(timeout=5)
+            thread = feeder._thread
+            assert thread is not None, "ScreenCaptureFeeder thread was not started."
+            thread.join(timeout=5)
+            assert not thread.is_alive(), "ScreenCaptureFeeder thread did not exit within 5 seconds."
             feeder.stop()
         # feeder 应在达到 max_consecutive_errors (30) 时停止
         assert 30 <= call_count <= 35

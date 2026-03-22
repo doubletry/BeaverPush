@@ -58,7 +58,7 @@ def setup_logging():
                 format="{time:HH:mm:ss} | {level:<8} | {message}",
                 level="WARNING",
             )
-        except (OSError, ValueError):
-            pass  # stderr 不可写（打包环境）或参数异常，静默跳过
+        except OSError:
+            pass  # stderr 不可写（打包环境），静默跳过
 
     logger.info("日志系统已初始化，日志目录: {}", LOG_DIR)
