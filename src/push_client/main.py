@@ -30,10 +30,14 @@ from PySide6.QtWidgets import QApplication
 from push_client.views.theme import Theme
 from push_client.views.main_window import MainWindow
 from push_client.controllers.app_controller import AppController
+from push_client.services.log_service import setup_logging, logger
 
 
 def main():
     """应用程序入口函数。"""
+    setup_logging()
+    logger.info("应用启动")
+
     app = QApplication(sys.argv)
     app.setApplicationName("RTSP 推流客户端")
     app.setQuitOnLastWindowClosed(False)

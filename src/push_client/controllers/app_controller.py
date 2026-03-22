@@ -23,7 +23,7 @@ from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
 from PySide6.QtGui import QAction, QCloseEvent
 
 from ..models.config import (
-    AppConfig, StreamConfig, load_config, save_config,
+    AppConfig, StreamConfig, load_config, save_config, load_stream_config,
 )
 from ..services.device_service import (
     list_cameras, list_screens, list_windows,
@@ -32,6 +32,7 @@ from ..services.ffmpeg_path import get_ffmpeg
 from ..views.main_window import MainWindow
 from ..views.stream_card import StreamCardView
 from .stream_controller import StreamController
+from ..services.log_service import logger
 
 
 class AppController(QObject):
@@ -67,6 +68,8 @@ class AppController(QObject):
 
         # 加载已保存的通道配置
         self._load_saved_config()
+
+        logger.info("AppController 初始化完成，加载 {} 路通道", len(self._controllers))
 
     # ==================================================================
     #  信号连接
@@ -157,10 +160,13 @@ class AppController(QObject):
             else:
                 self._window.show_test_result(True, "服务器已响应，连接正常。")
         except subprocess.TimeoutExpired:
+            logger.warning("RTSP 连接测试超时: {}", self._rtsp_server)
             self._window.show_test_result(False, "连接超时，请检查地址和网络。")
         except FileNotFoundError:
+            logger.error("ffmpeg 可执行文件未找到")
             self._window.show_test_result(False, "未找到 ffmpeg，请确认已安装并添加到 PATH。")
         except Exception as e:
+            logger.exception("RTSP 连接测试异常")
             self._window.show_test_result(False, f"测试失败: {e}")
         finally:
             self._window.set_test_button_testing(False)
@@ -213,6 +219,7 @@ class AppController(QObject):
             lambda key: self._refresh_devices(key, card)
         )
 
+        logger.info("添加推流通道 #{}", channel_index + 1)
         self._window.set_status(f"已添加推流通道，共 {len(self._controllers)} 路")
         return ctrl
 
@@ -229,6 +236,7 @@ class AppController(QObject):
         self._window.remove_card(ctrl.card)
         self._controllers.remove(ctrl)
         ctrl.deleteLater()
+        logger.info("移除推流通道，剩余 {} 路", len(self._controllers))
         self._window.set_status(f"已移除推流通道，剩余 {len(self._controllers)} 路")
 
     # ==================================================================
@@ -297,6 +305,7 @@ class AppController(QObject):
         for ctrl in self._controllers:
             cfg.add_stream(ctrl.to_config())
         save_config(cfg)
+        logger.info("配置已保存，共 {} 路通道", len(cfg.streams))
         self._window.set_status("配置已保存")
 
     def _load_saved_config(self):
@@ -313,7 +322,7 @@ class AppController(QObject):
 
         for stream_data in self._config.streams:
             try:
-                cfg = StreamConfig(**stream_data)
+                cfg = load_stream_config(stream_data)
                 ctrl = self.add_stream()
                 ctrl.from_config(cfg)
                 # 如果是设备类型，自动刷新设备列表
@@ -323,7 +332,7 @@ class AppController(QObject):
                 if cfg.auto_start:
                     auto_start_ctrls.append(ctrl)
             except Exception:
-                pass
+                logger.exception("加载通道配置失败: {}", stream_data)
 
         # 延迟启动，确保所有 UI 就绪
         if auto_start_ctrls:

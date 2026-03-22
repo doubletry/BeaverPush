@@ -36,6 +36,7 @@ from PySide6.QtCore import QThread, Signal
 
 from .ffmpeg_path import get_ffmpeg, get_ffplay
 from .window_capture import WindowCaptureFeeder, ScreenCaptureFeeder, get_window_rect
+from .log_service import logger
 
 
 def _make_even(v: int) -> int:
@@ -107,6 +108,7 @@ class FFmpegWorker(QThread):
     def run(self):
         self._stop_flag = False
         self.status_changed.emit("正在启动推流...")
+        logger.debug("FFmpeg 启动命令: {}", " ".join(self._cmd))
 
         try:
             use_pipe = self._window_hwnd != 0 or self._screen_w != 0
@@ -168,12 +170,15 @@ class FFmpegWorker(QThread):
                     )
 
         except FileNotFoundError:
+            logger.error("ffmpeg 可执行文件未找到")
             self.error_occurred.emit(
                 "未找到 ffmpeg，请确认 FFmpeg 已安装并加入 PATH"
             )
         except PermissionError:
+            logger.error("ffmpeg 执行权限不足")
             self.error_occurred.emit("没有权限执行 ffmpeg")
         except Exception as e:
+            logger.exception("FFmpeg 推流异常")
             self.error_occurred.emit(f"推流异常: {e}")
         finally:
             self._cleanup()

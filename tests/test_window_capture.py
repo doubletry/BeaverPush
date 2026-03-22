@@ -9,6 +9,8 @@ import ctypes
 from push_client.services.window_capture import (
     _make_even,
     ScreenCaptureFeeder,
+    CAPTUREBLT,
+    SRCCOPY,
 )
 
 
@@ -74,18 +76,22 @@ class TestScreenCaptureStructures:
 
 
 class TestCursorDrawingResilience:
-    """光标绘制失败不应阻断截图"""
+    """光标绘制相关测试"""
 
-    def test_cursor_exception_does_not_break_capture(self):
+    def test_captureblt_flag_defined(self):
+        """验证 CAPTUREBLT 常量已定义，用于在 BitBlt 中包含光标"""
+        assert CAPTUREBLT == 0x40000000
+        # 确认与 SRCCOPY 组合使用
+        combined = SRCCOPY | CAPTUREBLT
+        assert combined != SRCCOPY
+
+    def test_capture_screen_frame_returns_data(self):
+        """capture_screen_frame 应正常返回帧数据"""
         from push_client.services.window_capture import capture_screen_frame
         with mock.patch(
-            "push_client.services.window_capture._draw_cursor_on_dc",
-            side_effect=OSError("cursor error"),
-        ), mock.patch(
             "push_client.services.window_capture._extract_pixels",
             return_value=b"\x00" * 100,
         ):
-            # 即使光标绘制抛异常，仍应返回帧数据
             result = capture_screen_frame(0, 0, 10, 10)
             assert result is not None
             assert len(result) == 100

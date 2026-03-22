@@ -32,8 +32,11 @@ import time
 import subprocess
 import threading
 
+from .log_service import logger
+
 # Win32 常量
 SRCCOPY = 0x00CC0020
+CAPTUREBLT = 0x40000000
 DIB_RGB_COLORS = 0
 BI_RGB = 0
 PW_CLIENTONLY = 1
@@ -324,8 +327,10 @@ class WindowCaptureFeeder:
                 self._process.stdin.flush()
 
             except (BrokenPipeError, OSError):
+                logger.debug("窗口捕获管道已关闭")
                 break
             except Exception:
+                logger.exception("窗口捕获循环异常")
                 break
 
             elapsed = time.perf_counter() - start_time
@@ -444,11 +449,11 @@ def capture_screen_frame(x: int, y: int, w: int, h: int) -> bytes | None:
         bitmap = gdi32.CreateCompatibleBitmap(screen_dc, w, h)
         gdi32.SelectObject(mem_dc, bitmap)
 
-        gdi32.BitBlt(mem_dc, 0, 0, w, h, screen_dc, x, y, SRCCOPY)
-        try:
-            _draw_cursor_on_dc(mem_dc, x, y, w, h)
-        except Exception:
-            pass  # 光标绘制失败不影响截图
+        gdi32.BitBlt(mem_dc, 0, 0, w, h, screen_dc, x, y, SRCCOPY | CAPTUREBLT)
+        # 注意：不再手动绘制鼠标光标。
+        # Windows 10/11 的 DWM 合成器已将鼠标光标渲染到屏幕缓冲区中，
+        # BitBlt + CAPTUREBLT 能直接捕获包含光标的画面。
+        # 之前手动调用 DrawIconEx 导致光标被绘制两次，产生闪烁。
 
         data = _extract_pixels(mem_dc, bitmap, w, h)
         gdi32.DeleteObject(bitmap)
@@ -504,9 +509,11 @@ class ScreenCaptureFeeder:
                     self._process.stdin.write(data)
                     self._process.stdin.flush()
             except (BrokenPipeError, OSError):
+                logger.debug("屏幕捕获管道已关闭")
                 break
             except Exception:
                 # 截图异常时跳过当前帧，继续尝试
+                logger.warning("屏幕捕获帧异常，跳过")
                 pass
 
             elapsed = time.perf_counter() - start_time

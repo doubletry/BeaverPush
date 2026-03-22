@@ -20,7 +20,7 @@ from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QScrollArea,
-    QMessageBox,
+    QMessageBox, QFrame,
 )
 
 from .theme import Theme
@@ -62,21 +62,55 @@ class MainWindow(QMainWindow):
     # ==================================================================
 
     def _build_ui(self):
-        """构建主窗口布局：工具栏 + 卡片列表 + 状态栏。"""
+        """构建主窗口布局：全局配置卡片 + 卡片列表 + 状态栏。"""
         central = QWidget()
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
         root.setContentsMargins(16, 16, 16, 16)
         root.setSpacing(12)
 
-        # ── 顶部工具栏第 1 行：RTSP + 客户端 ID + 锁定 ──
-        root.addLayout(self._build_toolbar())
-        # ── 顶部工具栏第 2 行：功能按钮 ──
-        root.addLayout(self._build_action_bar())
+        # ── 全局配置卡片 ──
+        root.addWidget(self._build_global_card())
         # ── 卡片滚动区域 ──
         root.addWidget(self._build_scroll_area(), 1)
         # ── 底部状态栏 ──
         root.addWidget(self._build_status_bar())
+
+    def _build_global_card(self) -> QFrame:
+        """构建全局配置卡片（标题 + RTSP/客户端 ID + 功能按钮）。"""
+        card = QFrame()
+        card.setFrameShape(QFrame.Shape.StyledPanel)
+        card.setStyleSheet(f"""
+            QFrame#globalCard {{
+                background-color: {Theme.MANTLE};
+                border: 1px solid {Theme.SURFACE0};
+                border-radius: {Theme.RADIUS_LARGE}px;
+            }}
+        """)
+        card.setObjectName("globalCard")
+
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(10)
+
+        # ── 标题栏 ──
+        title = QLabel("全局配置")
+        title.setStyleSheet(f"""
+            background-color: {Theme.MAUVE};
+            color: {Theme.BASE};
+            font-weight: bold;
+            border-radius: {Theme.RADIUS_SMALL}px;
+            padding: 4px;
+            qproperty-alignment: AlignCenter;
+        """)
+        layout.addWidget(title)
+
+        # ── 第 1 行：RTSP 服务器 + 客户端 ID + 锁定 ──
+        layout.addLayout(self._build_toolbar())
+        # ── 第 2 行：功能按钮 ──
+        layout.addLayout(self._build_action_bar())
+
+        return card
 
     def _build_toolbar(self) -> QHBoxLayout:
         """构建顶部工具栏：RTSP 服务器 + 客户端 ID + 锁定按钮。"""

@@ -23,7 +23,7 @@
 import json
 import os
 from pathlib import Path
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field, asdict, fields as dataclass_fields
 
 CONFIG_DIR = Path(os.environ.get("APPDATA", Path.home())) / "PushClient"
 CONFIG_FILE = CONFIG_DIR / "config.json"
@@ -48,6 +48,7 @@ class StreamConfig:
         auto_start:   是否自动开始推流（保存时记录推流状态，加载时自动恢复）
     """
     name: str = ""
+    title: str = ""             # 通道标题（可由用户自定义）
     source_type: str = ""       # video / camera / rtsp / screen / window
     source_path: str = ""       # 文件路径 / 设备名 / RTSP URL / 屏幕索引 / hwnd
     rtsp_url: str = ""
@@ -85,6 +86,13 @@ class AppConfig:
         """移除指定索引的推流配置。"""
         if 0 <= index < len(self.streams):
             self.streams.pop(index)
+
+
+def load_stream_config(data: dict) -> StreamConfig:
+    """从字典安全地构建 StreamConfig，忽略未知字段。"""
+    known = {f.name for f in dataclass_fields(StreamConfig)}
+    filtered = {k: v for k, v in data.items() if k in known}
+    return StreamConfig(**filtered)
 
 
 def load_config() -> AppConfig:

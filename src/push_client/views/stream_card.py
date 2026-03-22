@@ -17,7 +17,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Signal, Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QVBoxLayout, QLabel, QLineEdit,
@@ -80,6 +80,7 @@ class StreamCardView(QFrame):
     bitrate_edited      = Signal(str)
     loop_toggled        = Signal(bool)
     preview_toggled     = Signal(bool)
+    title_edited        = Signal(str)
 
     def __init__(self, channel_index: int, parent=None):
         """初始化推流通道卡片。
@@ -114,17 +115,39 @@ class StreamCardView(QFrame):
         root.setContentsMargins(14, 14, 14, 14)
         root.setSpacing(10)
 
-        # ── 标题栏 ──
-        self._title_label = QLabel(f"推流通道 {self._channel_index + 1}")
-        self._title_label.setStyleSheet(f"""
+        # ── 标题栏（可点击编辑）──
+        self._title_text = f"推流通道 {self._channel_index + 1}"
+        title_style = f"""
             background-color: {Theme.BLUE};
             color: {Theme.BASE};
             font-weight: bold;
             border-radius: {Theme.RADIUS_SMALL}px;
             padding: 4px;
             qproperty-alignment: AlignCenter;
+        """
+
+        self._title_label = QLabel(self._title_text)
+        self._title_label.setStyleSheet(title_style)
+        self._title_label.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._title_label.setToolTip("点击修改通道名称")
+        self._title_label.mousePressEvent = self._on_title_clicked
+
+        self._title_edit = QLineEdit()
+        self._title_edit.setStyleSheet(f"""
+            background-color: {Theme.SURFACE0};
+            color: {Theme.TEXT};
+            font-weight: bold;
+            border: 2px solid {Theme.BLUE};
+            border-radius: {Theme.RADIUS_SMALL}px;
+            padding: 3px;
         """)
+        self._title_edit.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._title_edit.setVisible(False)
+        self._title_edit.returnPressed.connect(self._finish_title_edit)
+        self._title_edit.editingFinished.connect(self._finish_title_edit)
+
         root.addWidget(self._title_label)
+        root.addWidget(self._title_edit)
 
         # ── 第 1 行：视频源选择 ──
         root.addLayout(self._build_row1())
@@ -391,6 +414,28 @@ class StreamCardView(QFrame):
         if value is not None:
             self.device_selected.emit(str(value))
 
+    # ── 标题编辑 ──
+
+    def _on_title_clicked(self, _event):
+        """点击标题标签，切换为编辑模式。"""
+        self._title_label.setVisible(False)
+        self._title_edit.setText(self._title_text)
+        self._title_edit.setVisible(True)
+        self._title_edit.setFocus()
+        self._title_edit.selectAll()
+
+    def _finish_title_edit(self):
+        """完成标题编辑，切换回标签模式。"""
+        if not self._title_edit.isVisible():
+            return
+        new_text = self._title_edit.text().strip()
+        if new_text and new_text != self._title_text:
+            self._title_text = new_text
+            self._title_label.setText(new_text)
+            self.title_edited.emit(new_text)
+        self._title_edit.setVisible(False)
+        self._title_label.setVisible(True)
+
     # ==================================================================
     #  公共方法：供 Controller 调用读写 UI 状态
     # ==================================================================
@@ -398,6 +443,16 @@ class StreamCardView(QFrame):
     def get_source_type(self) -> str:
         """获取当前选中的视频源类型 key。"""
         return self._source_type_combo.currentData() or ""
+
+    def get_title(self) -> str:
+        """获取通道标题。"""
+        return self._title_text
+
+    def set_title(self, title: str):
+        """设置通道标题（不触发 title_edited 信号）。"""
+        if title:
+            self._title_text = title
+            self._title_label.setText(title)
 
     def set_source_type(self, key: str):
         """设置视频源类型。"""

@@ -22,6 +22,7 @@ from ..services.ffmpeg_service import (
 )
 from ..services.device_service import probe_video_info, get_screen_refresh_rate
 from ..views.stream_card import StreamCardView
+from ..services.log_service import logger
 
 
 class StreamController(QObject):
@@ -63,6 +64,7 @@ class StreamController(QObject):
         self._source_type = card.get_source_type() or "video"
         self._source_path = ""
         self._stream_name = ""
+        self._title = ""
         self._loop = False
         self._preview = False
         self._video_codec = ""
@@ -94,6 +96,7 @@ class StreamController(QObject):
         c.bitrate_edited.connect(self._on_bitrate)
         c.loop_toggled.connect(self._on_loop)
         c.preview_toggled.connect(self._on_preview)
+        c.title_edited.connect(self._on_title)
 
     # ── 数据同步回调 ──
 
@@ -137,6 +140,9 @@ class StreamController(QObject):
 
     def _on_preview(self, val: bool):
         self._preview = val
+
+    def _on_title(self, title: str):
+        self._title = title
 
     # ==================================================================
     #  推流控制
@@ -265,11 +271,15 @@ class StreamController(QObject):
         self._worker.stopped.connect(self._on_worker_stopped)
         self._worker.start()
 
+        logger.info("推流启动: ch={} url={} source={}/{}",
+                    self._channel_index, rtsp_url,
+                    self._source_type, self._source_path)
         self._set_state(StreamState.STARTING)
 
     def stop_stream(self):
         """请求停止推流。"""
         if self._worker:
+            logger.info("推流停止: ch={}", self._channel_index)
             self._set_state(StreamState.STOPPING)
             self._worker.stop()
 
@@ -294,6 +304,7 @@ class StreamController(QObject):
     def _on_worker_error(self, msg: str):
         """FFmpeg 报错。"""
         friendly = friendly_error(msg)
+        logger.error("推流错误 ch={}: {}", self._channel_index, friendly)
         self._card.set_status("错误", "error")
         self._set_state(StreamState.ERROR)
         self._card.show_error(friendly)
@@ -364,6 +375,7 @@ class StreamController(QObject):
         codec = self._video_codec if self._video_codec != "自动" else ""
         return StreamConfig(
             name=self._stream_name,
+            title=self._title,
             source_type=self._source_type,
             source_path=self._source_path,
             loop=self._loop,
@@ -381,6 +393,7 @@ class StreamController(QObject):
         self._source_type = cfg.source_type
         self._source_path = cfg.source_path
         self._stream_name = cfg.name
+        self._title = cfg.title
         self._loop = cfg.loop
         self._preview = cfg.preview
         self._video_codec = cfg.video_codec if cfg.video_codec else "自动"
@@ -391,6 +404,8 @@ class StreamController(QObject):
 
         # 同步到 View
         card = self._card
+        if cfg.title:
+            card.set_title(cfg.title)
         card.set_source_type(cfg.source_type)
         card.set_source_path(cfg.source_path)
         card.set_stream_name(cfg.name)

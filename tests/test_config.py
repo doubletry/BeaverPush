@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest import mock
 
 from push_client.models.config import (
-    AppConfig, StreamConfig, load_config, save_config,
+    AppConfig, StreamConfig, load_config, save_config, load_stream_config,
 )
 
 
@@ -14,6 +14,7 @@ class TestStreamConfig:
     def test_defaults(self):
         cfg = StreamConfig()
         assert cfg.name == ""
+        assert cfg.title == ""
         assert cfg.source_type == ""
         assert cfg.source_path == ""
         assert cfg.loop is False
@@ -28,6 +29,7 @@ class TestStreamConfig:
     def test_custom_values(self):
         cfg = StreamConfig(
             name="stream1",
+            title="我的通道",
             source_type="video",
             source_path="/test.mp4",
             loop=True,
@@ -38,6 +40,7 @@ class TestStreamConfig:
             bitrate="2M",
         )
         assert cfg.name == "stream1"
+        assert cfg.title == "我的通道"
         assert cfg.source_type == "video"
         assert cfg.width == "1920"
         assert cfg.bitrate == "2M"
@@ -98,6 +101,32 @@ class TestConfigPersistence:
             cfg = load_config()
             assert cfg.rtsp_server == ""
             assert cfg.client_id == ""
+
+
+class TestLoadStreamConfig:
+    def test_normal_data(self):
+        data = {"name": "s1", "source_type": "video", "title": "我的通道"}
+        cfg = load_stream_config(data)
+        assert cfg.name == "s1"
+        assert cfg.title == "我的通道"
+        assert cfg.source_type == "video"
+
+    def test_extra_keys_ignored(self):
+        data = {"name": "s1", "source_type": "video", "unknown_field": True}
+        cfg = load_stream_config(data)
+        assert cfg.name == "s1"
+        assert not hasattr(cfg, "unknown_field")
+
+    def test_missing_keys_use_defaults(self):
+        data = {"name": "s1"}
+        cfg = load_stream_config(data)
+        assert cfg.name == "s1"
+        assert cfg.source_type == ""
+        assert cfg.title == ""
+
+    def test_empty_data(self):
+        cfg = load_stream_config({})
+        assert cfg.name == ""
 
     def test_load_corrupt_file(self, tmp_path):
         config_file = tmp_path / "config.json"
