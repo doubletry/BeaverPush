@@ -22,6 +22,7 @@ from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QVBoxLayout, QLabel, QLineEdit,
     QComboBox, QPushButton, QCheckBox, QFileDialog, QMessageBox,
+    QWidget,
 )
 
 from .theme import Theme
@@ -108,7 +109,7 @@ class StreamCardView(QFrame):
     # ==================================================================
 
     def _build_ui(self):
-        """构建三行布局。"""
+        """构建三行布局 + 可折叠高级配置。"""
         root = QVBoxLayout(self)
         root.setContentsMargins(14, 14, 14, 14)
         root.setSpacing(10)
@@ -127,8 +128,12 @@ class StreamCardView(QFrame):
 
         # ── 第 1 行：视频源选择 ──
         root.addLayout(self._build_row1())
-        # ── 第 2 行：推流参数 ──
+        # ── 第 2 行：基本参数（流名称 + 配置模式切换 + 预览）──
         root.addLayout(self._build_row2())
+        # ── 高级配置面板（默认隐藏）──
+        self._advanced_panel = self._build_advanced_panel()
+        self._advanced_panel.setVisible(False)
+        root.addWidget(self._advanced_panel)
         # ── 第 3 行：控制 + 状态 ──
         root.addLayout(self._build_row3())
 
@@ -178,7 +183,7 @@ class StreamCardView(QFrame):
         return row
 
     def _build_row2(self) -> QHBoxLayout:
-        """第 2 行：推流参数。"""
+        """第 2 行：流名称 + 配置模式切换 + 预览。"""
         row = QHBoxLayout()
         row.setSpacing(8)
 
@@ -187,6 +192,25 @@ class StreamCardView(QFrame):
         self._stream_name_input.setPlaceholderText("如 stream1")
         self._stream_name_input.setFixedWidth(120)
         row.addWidget(self._stream_name_input)
+
+        # 配置模式切换
+        self._settings_combo = QComboBox()
+        self._settings_combo.setFixedWidth(100)
+        self._settings_combo.addItems(["基本设置", "高级设置"])
+        row.addWidget(self._settings_combo)
+
+        self._preview_check = QCheckBox("预览")
+        row.addWidget(self._preview_check)
+
+        row.addStretch()
+        return row
+
+    def _build_advanced_panel(self) -> QWidget:
+        """构建高级配置面板（编码、分辨率、帧率、码率）。"""
+        panel = QWidget()
+        row = QHBoxLayout(panel)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(8)
 
         row.addWidget(QLabel("编码:"))
         self._codec_combo = QComboBox()
@@ -217,11 +241,8 @@ class StreamCardView(QFrame):
         self._bitrate_input.setFixedWidth(60)
         row.addWidget(self._bitrate_input)
 
-        self._preview_check = QCheckBox("预览")
-        row.addWidget(self._preview_check)
-
         row.addStretch()
-        return row
+        return panel
 
     def _build_row3(self) -> QHBoxLayout:
         """第 3 行：控制按钮 + 状态。"""
@@ -329,6 +350,12 @@ class StreamCardView(QFrame):
         # 复选框
         self._loop_check.toggled.connect(self.loop_toggled.emit)
         self._preview_check.toggled.connect(self.preview_toggled.emit)
+        # 高级/基本设置切换
+        self._settings_combo.currentIndexChanged.connect(self._on_settings_mode_changed)
+
+    def _on_settings_mode_changed(self, idx: int):
+        """切换基本/高级设置模式。"""
+        self._advanced_panel.setVisible(idx == 1)
 
     def _on_source_type_changed(self, idx: int):
         """源类型切换时更新 UI 可见性并发出信号。"""
@@ -438,6 +465,13 @@ class StreamCardView(QFrame):
         self._bitrate_input.setText(br)
         self._bitrate_input.blockSignals(False)
 
+    def set_advanced_mode(self, advanced: bool):
+        """设置高级模式（展开高级面板）。"""
+        self._settings_combo.blockSignals(True)
+        self._settings_combo.setCurrentIndex(1 if advanced else 0)
+        self._settings_combo.blockSignals(False)
+        self._advanced_panel.setVisible(advanced)
+
     def get_loop(self) -> bool:
         return self._loop_check.isChecked()
 
@@ -545,6 +579,7 @@ class StreamCardView(QFrame):
         self._refresh_btn.setEnabled(not locked)
         self._loop_check.setEnabled(not locked)
         self._stream_name_input.setReadOnly(read_only)
+        self._settings_combo.setEnabled(not locked)
         self._codec_combo.setEnabled(not locked)
         self._width_input.setReadOnly(read_only)
         self._height_input.setReadOnly(read_only)

@@ -60,7 +60,7 @@ class StreamController(QObject):
         self._state = StreamState.IDLE
 
         # ── 内部数据（与 UI 同步）──
-        self._source_type = ""
+        self._source_type = card.get_source_type() or "video"
         self._source_path = ""
         self._stream_name = ""
         self._loop = False
@@ -401,3 +401,10 @@ class StreamController(QObject):
         card.set_height(cfg.height)
         card.set_fps(cfg.framerate)
         card.set_bitrate(cfg.bitrate)
+
+        # 有高级参数时自动展开高级面板
+        has_advanced = any([
+            cfg.video_codec, cfg.width, cfg.height,
+            cfg.framerate, cfg.bitrate,
+        ])
+        card.set_advanced_mode(has_advanced)

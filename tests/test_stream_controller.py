@@ -14,7 +14,7 @@ from push_client.models.config import StreamConfig
 def _make_mock_card():
     """创建模拟的 StreamCardView"""
     card = mock.MagicMock()
-    card.get_source_type.return_value = ""
+    card.get_source_type.return_value = "video"
     card.get_source_path.return_value = ""
     card.get_stream_name.return_value = ""
     # 信号 mock
@@ -326,6 +326,40 @@ class TestStreamControllerState:
         )
         assert ctrl._state == StreamState.IDLE
         assert not ctrl.is_streaming
+
+    def test_initial_source_type_from_card(self):
+        """新建卡片时 source_type 应取自 card 默认值"""
+        card = _make_mock_card()
+        card.get_source_type.return_value = "video"
+        ctrl = StreamController(
+            card=card,
+            channel_index=0,
+            rtsp_server_getter=lambda: "",
+            client_id_getter=lambda: "",
+        )
+        assert ctrl._source_type == "video"
+
+    def test_from_config_shows_advanced_when_has_params(self):
+        """加载有高级参数的配置时自动展开高级面板"""
+        card = _make_mock_card()
+        ctrl = StreamController(
+            card=card, channel_index=0,
+            rtsp_server_getter=lambda: "", client_id_getter=lambda: "c1",
+        )
+        cfg = StreamConfig(name="s1", video_codec="libx264", width="1920")
+        ctrl.from_config(cfg)
+        card.set_advanced_mode.assert_called_with(True)
+
+    def test_from_config_hides_advanced_when_no_params(self):
+        """加载无高级参数的配置时不展开高级面板"""
+        card = _make_mock_card()
+        ctrl = StreamController(
+            card=card, channel_index=0,
+            rtsp_server_getter=lambda: "", client_id_getter=lambda: "c1",
+        )
+        cfg = StreamConfig(name="s1", source_type="video")
+        ctrl.from_config(cfg)
+        card.set_advanced_mode.assert_called_with(False)
 
     def test_channel_index(self):
         card = _make_mock_card()
