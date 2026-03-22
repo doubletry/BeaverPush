@@ -2,8 +2,16 @@
 ; SEE THE DOCUMENTATION FOR DETAILS ON CREATING INNO SETUP SCRIPT FILES!
 ; Non-commercial use only
 
+; MySourceDir 可通过 iscc /DMySourceDir=... 从命令行注入（CI 用）
+; 本地构建时默认为 ISS 文件所在目录
+#ifndef MySourceDir
+  #define MySourceDir SourcePath
+#endif
+
 #define MyAppName "河狸推流"
-#define MyAppVersion "0.1.0"
+#ifndef MyAppVersion
+  #define MyAppVersion "0.1.0"
+#endif
 #define MyAppPublisher "YiSheng, Inc."
 #define MyAppURL "https://www.yisheng.fun/"
 #define MyAppExeName "BeaverPush.exe"
@@ -33,9 +41,9 @@ DisableProgramGroupPage=yes
 ; Uncomment the following line to run in non administrative install mode (install for current user only).
 ;PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
-OutputDir=C:\Users\hslix\workspace\push_client\dist
+OutputDir={#MySourceDir}\dist
 OutputBaseFilename=BeaverPushSetup
-SetupIconFile=C:\Users\hslix\workspace\push_client\assets\beaver_logo.ico
+SetupIconFile={#MySourceDir}\assets\beaver_logo.ico
 SolidCompression=yes
 WizardStyle=modern
 
@@ -46,12 +54,12 @@ Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.i
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "C:\Users\hslix\workspace\push_client\dist\main.dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
-Source: "C:\Users\hslix\workspace\push_client\dist\main.dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#MySourceDir}\dist\main.dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#MySourceDir}\dist\main.dist\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; FFmpeg 可执行文件（放到安装目录的 ffmpeg 子目录）
-Source: "C:\Users\hslix\workspace\push_client\ffmpeg\ffmpeg.exe"; DestDir: "{app}\ffmpeg"; Flags: ignoreversion
-Source: "C:\Users\hslix\workspace\push_client\ffmpeg\ffplay.exe"; DestDir: "{app}\ffmpeg"; Flags: ignoreversion
-Source: "C:\Users\hslix\workspace\push_client\ffmpeg\ffprobe.exe"; DestDir: "{app}\ffmpeg"; Flags: ignoreversion
+Source: "{#MySourceDir}\ffmpeg\ffmpeg.exe"; DestDir: "{app}\ffmpeg"; Flags: ignoreversion
+Source: "{#MySourceDir}\ffmpeg\ffplay.exe"; DestDir: "{app}\ffmpeg"; Flags: ignoreversion
+Source: "{#MySourceDir}\ffmpeg\ffprobe.exe"; DestDir: "{app}\ffmpeg"; Flags: ignoreversion
 ; NOTE: Don't use "Flags: ignoreversion" on any shared system files
 
 [Icons]

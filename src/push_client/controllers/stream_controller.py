@@ -13,6 +13,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from PySide6.QtCore import QObject, Signal
 
 from ..models.stream_model import StreamState
@@ -48,8 +50,8 @@ class StreamController(QObject):
         self,
         card: StreamCardView,
         channel_index: int,
-        rtsp_server_getter: callable,
-        client_id_getter: callable = None,
+        rtsp_server_getter: Callable[[], str],
+        client_id_getter: Callable[[], str] | None = None,
         parent: QObject | None = None,
     ):
         super().__init__(parent)

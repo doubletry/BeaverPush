@@ -152,17 +152,18 @@ def list_screens() -> list[ScreenInfo]:
     if not screens:
         from PySide6.QtWidgets import QApplication
         app = QApplication.instance()
-        for i, screen in enumerate(app.screens()):
-            geo = screen.geometry()
-            ratio = screen.devicePixelRatio()
-            screens.append(ScreenInfo(
-                index=i,
-                name=screen.name(),
-                width=int(geo.width() * ratio),
-                height=int(geo.height() * ratio),
-                x=int(geo.x() * ratio),
-                y=int(geo.y() * ratio),
-            ))
+        if isinstance(app, QApplication):
+            for i, screen in enumerate(app.screens()):
+                geo = screen.geometry()
+                ratio = screen.devicePixelRatio()
+                screens.append(ScreenInfo(
+                    index=i,
+                    name=screen.name(),
+                    width=int(geo.width() * ratio),
+                    height=int(geo.height() * ratio),
+                    x=int(geo.x() * ratio),
+                    y=int(geo.y() * ratio),
+                ))
 
     return screens
 
@@ -319,7 +320,7 @@ def get_screen_refresh_rate(x: int, y: int) -> int:
     from PySide6.QtWidgets import QApplication
     from PySide6.QtCore import QPoint
     app = QApplication.instance()
-    if app:
+    if isinstance(app, QApplication):
         point = QPoint(x, y)
         for screen in app.screens():
             if screen.geometry().contains(point):

@@ -1,0 +1,139 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Poetry
+        run: pip install poetry
+
+      - name: Install dependencies
+        run: poetry install --no-interaction
+
+      - name: Extract version from tag
+        id: version
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $ver = $tag -replace '^v', ''
+          echo "VERSION=$ver" >> $env:GITHUB_OUTPUT
+          Write-Host "Version: $ver"
+
+      - name: Download FFmpeg
+        shell: pwsh
+        run: |
+          $ffmpegUrl = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
+          $zipPath = "$env:RUNNER_TEMP\ffmpeg.zip"
+          $extractPath = "$env:RUNNER_TEMP\ffmpeg-extract"
+
+          Write-Host "Downloading FFmpeg..."
+          Invoke-WebRequest -Uri $ffmpegUrl -OutFile $zipPath -UseBasicParsing
+
+          Write-Host "Extracting FFmpeg..."
+          Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
+
+          # Find the bin directory inside the extracted folder
+          $binDir = Get-ChildItem -Path $extractPath -Recurse -Directory -Filter "bin" | Select-Object -First 1
+          if (-not $binDir) {
+            Write-Error "FFmpeg bin directory not found"
+            exit 1
+          }
+
+          # Copy ffmpeg binaries to project ffmpeg/ directory
+          New-Item -ItemType Directory -Path "ffmpeg" -Force | Out-Null
+          Copy-Item "$($binDir.FullName)\ffmpeg.exe" -Destination "ffmpeg\ffmpeg.exe"
+          Copy-Item "$($binDir.FullName)\ffplay.exe" -Destination "ffmpeg\ffplay.exe"
+          Copy-Item "$($binDir.FullName)\ffprobe.exe" -Destination "ffmpeg\ffprobe.exe"
+
+          Write-Host "FFmpeg binaries copied to ffmpeg/"
+          Get-ChildItem "ffmpeg"
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          $isccPath = "${env:ProgramFiles(x86)}\Inno Setup 6"
+          echo "$isccPath" >> $env:GITHUB_PATH
+
+          # 下载中文语言文件（默认安装不包含）
+          $langDir = "$isccPath\Languages"
+          $islUrl = "https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/Unofficial/ChineseSimplified.isl"
+          Invoke-WebRequest -Uri $islUrl -OutFile "$langDir\ChineseSimplified.isl" -UseBasicParsing
+          Write-Host "Chinese language file installed to $langDir"
+
+      - name: Build & Package
+        shell: pwsh
+        run: |
+          .\build.ps1 -Version "${{ steps.version.outputs.VERSION }}"
+
+      - name: Test installer
+        shell: pwsh
+        run: |
+          $installer = "dist\BeaverPushSetup.exe"
+          $installDir = "$env:ProgramFiles\BeaverPush"
+
+          Write-Host "=== Running silent install ==="
+          Start-Process -FilePath $installer -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/DIR=$installDir" -Wait -NoNewWindow
+
+          Write-Host "=== Verifying installation ==="
+          if (-not (Test-Path "$installDir\BeaverPush.exe")) {
+            Write-Error "BeaverPush.exe not found after installation"
+            exit 1
+          }
+          Write-Host "BeaverPush.exe found at $installDir"
+
+          # List installed files
+          Get-ChildItem $installDir | Select-Object Name, Length | Format-Table -AutoSize
+
+          Write-Host "=== Launching exe to check for immediate crash ==="
+          $proc = Start-Process -FilePath "$installDir\BeaverPush.exe" -PassThru
+          Start-Sleep -Seconds 5
+
+          if ($proc.HasExited -and $proc.ExitCode -ne 0) {
+            Write-Error "BeaverPush.exe crashed on startup with exit code $($proc.ExitCode)"
+            exit 1
+          }
+
+          # Stop the process
+          if (-not $proc.HasExited) {
+            $proc.Kill()
+            Write-Host "App launched successfully and ran for 5 seconds without crash"
+          } else {
+            Write-Host "App exited cleanly with code $($proc.ExitCode)"
+          }
+
+          Write-Host "=== Uninstalling ==="
+          $uninstaller = "$installDir\unins000.exe"
+          if (Test-Path $uninstaller) {
+            Start-Process -FilePath $uninstaller -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES" -Wait -NoNewWindow
+            Write-Host "Uninstall completed"
+          }
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BeaverPushSetup
+          path: dist/BeaverPushSetup.exe
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/BeaverPushSetup.exe
+          generate_release_notes: true

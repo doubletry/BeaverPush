@@ -156,6 +156,7 @@ class FFmpegWorker(QThread):
                 time.sleep(2)
                 self._start_preview()
 
+            assert self._process.stderr is not None
             for line in iter(self._process.stderr.readline, b""):
                 if self._stop_flag:
                     break
@@ -172,7 +173,7 @@ class FFmpegWorker(QThread):
 
             self._process.wait()
 
-            if self._process.returncode != 0 and not self._stop_flag:
+            if self._process.returncode != 0 and not self._stop_flag and self._process.stderr:
                 remaining = self._process.stderr.read().decode(
                     "utf-8", errors="replace"
                 )

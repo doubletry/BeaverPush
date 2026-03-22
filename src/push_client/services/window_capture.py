@@ -389,8 +389,9 @@ class WindowCaptureFeeder:
                         data, w, h, self._current_w, self._current_h
                     )
 
-                self._process.stdin.write(data)
-                self._process.stdin.flush()
+                if self._process.stdin:
+                    self._process.stdin.write(data)
+                    self._process.stdin.flush()
 
             except (BrokenPipeError, OSError):
                 logger.debug("窗口捕获管道已关闭")
@@ -622,7 +623,7 @@ class ScreenCaptureFeeder:
             start_time = time.perf_counter()
             try:
                 data = capture_screen_frame(self.x, self.y, self.w, self.h)
-                if data:
+                if data and self._process.stdin:
                     self._process.stdin.write(data)
                     self._process.stdin.flush()
                     consecutive_errors = 0
