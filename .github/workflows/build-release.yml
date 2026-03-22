@@ -87,12 +87,15 @@ jobs:
         shell: pwsh
         run: |
           $installer = "dist\BeaverPushSetup.exe"
-          $installDir = "$env:ProgramFiles\BeaverPush"
+          $installDir = "C:\BeaverPush"
 
           Write-Host "=== Running silent install ==="
-          Start-Process -FilePath $installer -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/DIR=$installDir" -Wait -NoNewWindow
+          Start-Process -FilePath $installer -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/DIR=$installDir" -Wait
 
           Write-Host "=== Verifying installation ==="
+          if (Test-Path $installDir) {
+            Get-ChildItem $installDir | Select-Object Name | Format-Table -AutoSize
+          }
           if (-not (Test-Path "$installDir\BeaverPush.exe")) {
             Write-Error "BeaverPush.exe not found after installation"
             exit 1
