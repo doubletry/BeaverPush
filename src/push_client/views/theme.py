@@ -187,7 +187,7 @@ class Theme:
         QCheckBox::indicator:checked {{
             border-color: {cls.BLUE};
             background-color: {cls.BLUE};
-            image: url({(_ASSETS_DIR / 'checkmark.svg').as_posix()});
+            image: url("{(_ASSETS_DIR / 'checkmark.svg').as_uri()}");
         }}
 
         /* ── 滚动区域 ── */

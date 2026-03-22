@@ -57,9 +57,9 @@ class TestStreamControllerUrlConstruction:
             mock_build.return_value = ["ffmpeg", "-i", "test"]
             ctrl.start_stream()
             # 验证 build_ffmpeg_command 被调用时的 rtsp_url 参数
-            if mock_build.called:
-                _, kwargs = mock_build.call_args
-                assert kwargs["rtsp_url"] == "rtsp://localhost:8554/client01/stream1"
+            mock_build.assert_called_once()
+            _, kwargs = mock_build.call_args
+            assert kwargs["rtsp_url"] == "rtsp://localhost:8554/client01/stream1"
 
     def test_missing_client_id_shows_error(self):
         card = _make_mock_card()
@@ -133,13 +133,13 @@ class TestStreamControllerSourceDefaults:
         ):
             mock_build.return_value = ["ffmpeg"]
             ctrl.start_stream()
-            if mock_build.called:
-                _, kwargs = mock_build.call_args
-                assert kwargs["video_codec"] == "libx264"
-                # 管道模式不设置 width/height（尺寸在 rawvideo 参数中指定）
-                assert kwargs["width"] == ""
-                assert kwargs["height"] == ""
-                assert kwargs["framerate"] == "60"
+            mock_build.assert_called_once()
+            _, kwargs = mock_build.call_args
+            assert kwargs["video_codec"] == "libx264"
+            # 管道模式不设置 width/height（尺寸在 rawvideo 参数中指定）
+            assert kwargs["width"] == ""
+            assert kwargs["height"] == ""
+            assert kwargs["framerate"] == "60"
 
     def test_video_defaults_codec_to_copy(self):
         card = _make_mock_card()
@@ -164,13 +164,13 @@ class TestStreamControllerSourceDefaults:
         ):
             mock_build.return_value = ["ffmpeg"]
             ctrl.start_stream()
-            if mock_build.called:
-                _, kwargs = mock_build.call_args
-                assert kwargs["video_codec"] == "copy"
-                # copy 模式不设置 width/height（不能使用滤镜）
-                assert kwargs["width"] == ""
-                assert kwargs["height"] == ""
-                assert kwargs["framerate"] == "30"
+            mock_build.assert_called_once()
+            _, kwargs = mock_build.call_args
+            assert kwargs["video_codec"] == "copy"
+            # copy 模式不设置 width/height（不能使用滤镜）
+            assert kwargs["width"] == ""
+            assert kwargs["height"] == ""
+            assert kwargs["framerate"] == "30"
 
     def test_rtsp_defaults_codec_to_copy(self):
         card = _make_mock_card()
@@ -192,9 +192,9 @@ class TestStreamControllerSourceDefaults:
         ):
             mock_build.return_value = ["ffmpeg"]
             ctrl.start_stream()
-            if mock_build.called:
-                _, kwargs = mock_build.call_args
-                assert kwargs["video_codec"] == "copy"
+            mock_build.assert_called_once()
+            _, kwargs = mock_build.call_args
+            assert kwargs["video_codec"] == "copy"
 
     def test_camera_defaults_codec_to_libx264(self):
         card = _make_mock_card()
@@ -216,9 +216,9 @@ class TestStreamControllerSourceDefaults:
         ):
             mock_build.return_value = ["ffmpeg"]
             ctrl.start_stream()
-            if mock_build.called:
-                _, kwargs = mock_build.call_args
-                assert kwargs["video_codec"] == "libx264"
+            mock_build.assert_called_once()
+            _, kwargs = mock_build.call_args
+            assert kwargs["video_codec"] == "libx264"
 
     def test_user_override_takes_precedence(self):
         """用户显式设置的参数优先于源默认值"""
@@ -247,12 +247,12 @@ class TestStreamControllerSourceDefaults:
         ):
             mock_build.return_value = ["ffmpeg"]
             ctrl.start_stream()
-            if mock_build.called:
-                _, kwargs = mock_build.call_args
-                assert kwargs["video_codec"] == "h264_nvenc"
-                assert kwargs["width"] == "1280"
-                assert kwargs["height"] == "720"
-                assert kwargs["framerate"] == "24"
+            mock_build.assert_called_once()
+            _, kwargs = mock_build.call_args
+            assert kwargs["video_codec"] == "h264_nvenc"
+            assert kwargs["width"] == "1280"
+            assert kwargs["height"] == "720"
+            assert kwargs["framerate"] == "24"
 
 
 class TestStreamControllerConfig:
@@ -384,7 +384,7 @@ class TestProgressSuppression:
         ctrl._source_type = "video"
         ctrl._on_worker_progress({"time": "00:01:00", "fps": "30", "speed": "1x"})
         # set_progress should never be called (method removed from card)
-        assert not hasattr(card, '_progress_set') or True  # mock doesn't track
+        assert not hasattr(card, "set_progress")
 
     def test_screen_progress_also_suppressed(self):
         card = _make_mock_card()

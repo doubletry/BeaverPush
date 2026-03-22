@@ -594,16 +594,15 @@ class StreamCardView(QFrame):
                 ``"stopping"``。
         """
         color_map = {
+            "idle": Theme.OVERLAY0,
+            "starting": Theme.OVERLAY0,
             "streaming": Theme.GREEN,
             "error": Theme.RED,
             "stopping": Theme.YELLOW,
         }
-        color = color_map.get(state, "")
+        color = color_map.get(state, Theme.OVERLAY0)
         self._status_label.setText(text)
-        if color:
-            self._status_label.setStyleSheet(f"color: {color}; font-weight: bold;")
-        else:
-            self._status_label.setStyleSheet("")
+        self._status_label.setStyleSheet(f"color: {color}; font-weight: bold;")
 
     def set_buttons_streaming(self, is_streaming: bool):
         """根据推流状态切换按钮启用/禁用。

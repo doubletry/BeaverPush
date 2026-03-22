@@ -368,19 +368,23 @@ def build_ffmpeg_command(
         # source_path 格式: "offset:x,y,w,h"
         if source_path.startswith("offset:"):
             parts = source_path.split(":", 1)[1].split(",")
-            if len(parts) == 4:
+            if len(parts) != 4:
+                raise ValueError("屏幕捕获源路径格式错误，应为 offset:x,y,w,h")
+            try:
                 ow, oh = int(parts[2]), int(parts[3])
-                w = _make_even(ow)
-                h = _make_even(oh)
-                fps = framerate if framerate else "30"
-                cmd += [
-                    "-use_wallclock_as_timestamps", "1",
-                    "-f", "rawvideo",
-                    "-pixel_format", "bgra",
-                    "-video_size", f"{w}x{h}",
-                    "-framerate", fps,
-                    "-i", "pipe:0",
-                ]
+            except ValueError:
+                raise ValueError("屏幕捕获源路径格式错误，宽度或高度必须为整数值")
+            w = _make_even(ow)
+            h = _make_even(oh)
+            fps = framerate if framerate else "30"
+            cmd += [
+                "-use_wallclock_as_timestamps", "1",
+                "-f", "rawvideo",
+                "-pixel_format", "bgra",
+                "-video_size", f"{w}x{h}",
+                "-framerate", fps,
+                "-i", "pipe:0",
+            ]
         else:
             raise ValueError("屏幕捕获源路径格式错误，应为 offset:x,y,w,h")
 

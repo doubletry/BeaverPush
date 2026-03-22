@@ -15,6 +15,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import Signal, Qt
 from PySide6.QtGui import QFont, QIcon
 from PySide6.QtWidgets import (
@@ -26,7 +28,7 @@ from PySide6.QtWidgets import (
 from .stream_card import StreamCardView
 from .theme import Theme
 
-_ASSETS_DIR = __import__("pathlib").Path(__file__).resolve().parent.parent.parent.parent / "assets"
+_ASSETS_DIR = Path(__file__).resolve().parent.parent.parent.parent / "assets"
 
 
 class MainWindow(QMainWindow):
