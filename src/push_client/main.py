@@ -47,7 +47,7 @@ def main():
     font.setPointSize(Theme.FONT_SIZE_NORMAL)
     app.setFont(font)
 
-    # ── 全局主题样式表（浅冷色系）──
+    # ── 全局主题样式表（Catppuccin Mocha）──
     app.setStyleSheet(Theme.global_stylesheet())
 
     # ── 窗口图标 ──

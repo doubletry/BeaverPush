@@ -92,7 +92,15 @@ class StreamCardView(QFrame):
         super().__init__(parent)
         self._channel_index = channel_index
 
+        # 应用卡片级样式
         self.setFrameShape(QFrame.Shape.StyledPanel)
+        self.setStyleSheet(f"""
+            StreamCardView {{
+                background-color: {Theme.MANTLE};
+                border: 1px solid {Theme.SURFACE0};
+                border-radius: {Theme.RADIUS_LARGE}px;
+            }}
+        """)
 
         self._build_ui()
         self._connect_signals()
@@ -114,6 +122,12 @@ class StreamCardView(QFrame):
         title_font = QFont()
         title_font.setBold(True)
         self._title_label.setFont(title_font)
+        self._title_label.setStyleSheet(f"""
+            background-color: {Theme.BLUE};
+            color: {Theme.BASE};
+            border-radius: {Theme.RADIUS_SMALL}px;
+            padding: 4px;
+        """)
         self._title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._title_label.setCursor(Qt.CursorShape.PointingHandCursor)
         self._title_label.setToolTip("点击修改通道名称")
@@ -229,24 +243,33 @@ class StreamCardView(QFrame):
         self._width_input = QLineEdit()
         self._width_input.setPlaceholderText("宽")
         self._width_input.setFixedWidth(55)
+        self._width_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
         row.addWidget(self._width_input)
         row.addWidget(QLabel("x"))
         self._height_input = QLineEdit()
         self._height_input.setPlaceholderText("高")
         self._height_input.setFixedWidth(55)
+        self._height_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
         row.addWidget(self._height_input)
 
         row.addWidget(QLabel("帧率:"))
         self._fps_input = QLineEdit()
         self._fps_input.setPlaceholderText("30")
         self._fps_input.setFixedWidth(50)
+        self._fps_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
         row.addWidget(self._fps_input)
 
         row.addWidget(QLabel("码率:"))
         self._bitrate_input = QLineEdit()
-        self._bitrate_input.setPlaceholderText("如 2M")
-        self._bitrate_input.setFixedWidth(60)
+        self._bitrate_input.setPlaceholderText("如 2")
+        self._bitrate_input.setFixedWidth(50)
+        self._bitrate_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
         row.addWidget(self._bitrate_input)
+        self._bitrate_unit_combo = QComboBox()
+        self._bitrate_unit_combo.addItems(["K", "M"])
+        self._bitrate_unit_combo.setCurrentText("M")
+        self._bitrate_unit_combo.setFixedWidth(45)
+        row.addWidget(self._bitrate_unit_combo)
 
         row.addStretch()
         return panel
@@ -259,21 +282,64 @@ class StreamCardView(QFrame):
         # 开始推流
         self._start_btn = QPushButton("▶ 开始推流")
         self._start_btn.setFixedWidth(100)
+        self._start_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {Theme.GREEN};
+                color: {Theme.BASE};
+                font-weight: bold;
+                border: 1px solid {Theme.GREEN};
+                border-radius: {Theme.RADIUS_NORMAL}px;
+            }}
+            QPushButton:hover {{ background-color: {Theme.TEAL}; }}
+            QPushButton:disabled {{
+                background-color: {Theme.SURFACE1};
+                color: {Theme.OVERLAY0};
+                border-color: {Theme.SURFACE1};
+            }}
+        """)
         row.addWidget(self._start_btn)
 
         # 停止推流
         self._stop_btn = QPushButton("■ 停止推流")
         self._stop_btn.setFixedWidth(90)
         self._stop_btn.setEnabled(False)
+        self._stop_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {Theme.RED};
+                color: {Theme.BASE};
+                font-weight: bold;
+                border: 1px solid {Theme.RED};
+                border-radius: {Theme.RADIUS_NORMAL}px;
+            }}
+            QPushButton:hover {{ background-color: {Theme.MAROON}; }}
+            QPushButton:disabled {{
+                background-color: {Theme.SURFACE1};
+                color: {Theme.OVERLAY0};
+                border-color: {Theme.SURFACE1};
+            }}
+        """)
         row.addWidget(self._stop_btn)
 
         # 移除通道
         self._remove_btn = QPushButton("✕ 移除")
         self._remove_btn.setFixedWidth(70)
+        self._remove_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {Theme.RED};
+                border: 1px solid {Theme.RED};
+                border-radius: {Theme.RADIUS_NORMAL}px;
+            }}
+            QPushButton:hover {{
+                background-color: {Theme.RED};
+                color: {Theme.BASE};
+            }}
+        """)
         row.addWidget(self._remove_btn)
 
         # 状态标签
         self._status_label = QLabel("就绪")
+        self._status_label.setStyleSheet(f"color: {Theme.OVERLAY0};")
         row.addWidget(self._status_label)
 
         row.addStretch()
@@ -304,7 +370,8 @@ class StreamCardView(QFrame):
         self._width_input.textChanged.connect(self.width_edited.emit)
         self._height_input.textChanged.connect(self.height_edited.emit)
         self._fps_input.textChanged.connect(self.fps_edited.emit)
-        self._bitrate_input.textChanged.connect(self.bitrate_edited.emit)
+        self._bitrate_input.textChanged.connect(self._emit_bitrate)
+        self._bitrate_unit_combo.currentTextChanged.connect(self._emit_bitrate)
         # 复选框
         self._loop_check.toggled.connect(self.loop_toggled.emit)
         self._preview_check.toggled.connect(self.preview_toggled.emit)
@@ -349,6 +416,10 @@ class StreamCardView(QFrame):
         value = self._device_combo.itemData(idx)
         if value is not None:
             self.device_selected.emit(str(value))
+
+    def _emit_bitrate(self):
+        """组合码率数值和单位，发出 bitrate_edited 信号。"""
+        self.bitrate_edited.emit(self.get_bitrate())
 
     # ── 标题编辑 ──
 
@@ -448,12 +519,21 @@ class StreamCardView(QFrame):
         self._fps_input.blockSignals(False)
 
     def get_bitrate(self) -> str:
-        return self._bitrate_input.text()
+        num = self._bitrate_input.text().strip()
+        if not num:
+            return ""
+        return num + self._bitrate_unit_combo.currentText()
 
     def set_bitrate(self, br: str):
         self._bitrate_input.blockSignals(True)
-        self._bitrate_input.setText(br)
+        self._bitrate_unit_combo.blockSignals(True)
+        if br and br[-1:].upper() in ("K", "M"):
+            self._bitrate_input.setText(br[:-1])
+            self._bitrate_unit_combo.setCurrentText(br[-1:].upper())
+        else:
+            self._bitrate_input.setText(br)
         self._bitrate_input.blockSignals(False)
+        self._bitrate_unit_combo.blockSignals(False)
 
     def set_advanced_mode(self, advanced: bool):
         """设置高级模式（展开高级面板）。"""
@@ -573,4 +653,5 @@ class StreamCardView(QFrame):
         self._height_input.setReadOnly(read_only)
         self._fps_input.setReadOnly(read_only)
         self._bitrate_input.setReadOnly(read_only)
+        self._bitrate_unit_combo.setEnabled(not locked)
         self._preview_check.setEnabled(not locked)
