@@ -92,6 +92,7 @@ class FFmpegWorker(QThread):
         self._screen_h: int = 0
         self._screen_fps: int = 30
         self._preview_monitor_thread: threading.Thread | None = None
+        self._streaming_announced = False
 
     def set_command(self, cmd: list[str]):
         self._cmd = cmd
@@ -125,6 +126,7 @@ class FFmpegWorker(QThread):
 
     def run(self):
         self._stop_flag = False
+        self._streaming_announced = False
         self.status_changed.emit("正在启动推流...")
         logger.debug("FFmpeg 启动命令: {}", " ".join(self._cmd))
 
@@ -138,6 +140,7 @@ class FFmpegWorker(QThread):
                 stderr=subprocess.PIPE,
                 creationflags=CREATE_NO_WINDOW,
             )
+            self.status_changed.emit("等待数据...")
 
             if use_pipe and self._window_hwnd:
                 self._capture_feeder = WindowCaptureFeeder(
@@ -151,8 +154,6 @@ class FFmpegWorker(QThread):
                     self._screen_fps,
                 )
                 self._screen_feeder.start(self._process)
-
-            self.status_changed.emit("推流中")
 
             if self._preview_enabled and self._preview_url:
                 import time
@@ -169,6 +170,9 @@ class FFmpegWorker(QThread):
 
                 info = self._parse_progress(line_str)
                 if info:
+                    if not self._streaming_announced:
+                        self._streaming_announced = True
+                        self.status_changed.emit("推流中")
                     self.progress_info.emit(info)
 
                 if self._is_error(line_str):
@@ -216,10 +220,6 @@ class FFmpegWorker(QThread):
         if self._process and self._process.poll() is None:
             try:
                 self._process.terminate()
-                try:
-                    self._process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    self._process.kill()
             except Exception:
                 pass
 
@@ -249,10 +249,6 @@ class FFmpegWorker(QThread):
             try:
                 if self._preview_process.poll() is None:
                     self._preview_process.terminate()
-                    try:
-                        self._preview_process.wait(timeout=3)
-                    except subprocess.TimeoutExpired:
-                        self._preview_process.kill()
             except Exception:
                 pass
             self._preview_process = None

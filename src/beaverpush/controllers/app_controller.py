@@ -28,6 +28,7 @@ from ..services.device_service import (
     list_cameras, list_screens, list_windows,
 )
 from ..services.ffmpeg_service import check_rtsp_server_reachable
+from ..services.connectivity_service import ConnectivityCheckWorker
 from ..views.main_window import MainWindow
 from ..views.stream_card import StreamCardView
 from .stream_controller import StreamController
@@ -58,6 +59,7 @@ class AppController(QObject):
         self._server_reconnect_max_attempts = self._config.server_reconnect_max_attempts
         self._controllers: list[StreamController] = []
         self._tray: QSystemTrayIcon | None = None
+        self._test_worker: ConnectivityCheckWorker | None = None
 
         # 同步初始状态到 View
         self._window.set_server(self._rtsp_server)
@@ -144,13 +146,23 @@ class AppController(QObject):
 
         self._window.set_test_button_testing(True)
         self._window.set_status("正在测试连接...")
+        worker = ConnectivityCheckWorker(
+            [("正在检测 RTSP 服务器...", lambda: check_rtsp_server_reachable(self._rtsp_server), "")],
+            self,
+        )
+        self._test_worker = worker
+        worker.stage_changed.connect(lambda stage: self._window.set_status(stage))
+        worker.check_completed.connect(self._on_test_completed)
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
 
-        try:
-            ok, message = check_rtsp_server_reachable(self._rtsp_server)
-            self._window.show_test_result(ok, message)
-        finally:
-            self._window.set_test_button_testing(False)
-            self._window.set_status("连接测试完成")
+    def _on_test_completed(self, ok: bool, message: str):
+        if self.sender() is not self._test_worker:
+            return
+        self._test_worker = None
+        self._window.show_test_result(ok, message)
+        self._window.set_test_button_testing(False)
+        self._window.set_status("连接测试完成")
 
     # ==================================================================
     #  推流通道管理

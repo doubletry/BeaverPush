@@ -350,6 +350,44 @@ class TestFFmpegWorkerInit:
             worker._preview_monitor_thread.join(timeout=2)
             mock_signal.emit.assert_not_called()
 
+    def test_status_turns_streaming_only_after_progress(self):
+        worker = FFmpegWorker()
+        worker.set_command(["ffmpeg", "-i", "test"])
+        statuses = []
+        progress = []
+        worker.status_changed.connect(statuses.append)
+        worker.progress_info.connect(progress.append)
+
+        mock_proc = mock.MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.wait.return_value = 0
+        mock_proc.stderr.readline.side_effect = [
+            b"frame=1 fps=25.0 size=1kB time=00:00:01 speed=1x\n",
+            b"",
+        ]
+        mock_proc.stderr.read.return_value = b""
+
+        with mock.patch(
+            "beaverpush.services.ffmpeg_service.subprocess.Popen",
+            return_value=mock_proc,
+        ):
+            worker.run()
+
+        assert statuses[:2] == ["正在启动推流...", "等待数据..."]
+        assert statuses[2] == "推流中"
+        assert progress
+
+    def test_stop_does_not_block_waiting_for_process_exit(self):
+        worker = FFmpegWorker()
+        mock_proc = mock.MagicMock()
+        mock_proc.poll.return_value = None
+        worker._process = mock_proc
+
+        worker.stop()
+
+        mock_proc.terminate.assert_called_once()
+        mock_proc.wait.assert_not_called()
+
 
 class TestFriendlyError:
     def test_connection_refused(self):

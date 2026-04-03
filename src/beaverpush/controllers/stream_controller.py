@@ -22,6 +22,7 @@ from ..models.config import StreamConfig
 from ..services.ffmpeg_service import (
     FFmpegWorker, build_ffmpeg_command, friendly_error, check_rtsp_server_reachable,
 )
+from ..services.connectivity_service import ConnectivityCheckWorker
 from ..services.device_service import probe_video_info, get_screen_refresh_rate, check_rtsp_reachable
 from ..views.stream_card import StreamCardView
 from ..services.log_service import logger
@@ -89,6 +90,7 @@ class StreamController(QObject):
         self._reconnect_timer = QTimer(self)
         self._reconnect_timer.setSingleShot(True)
         self._reconnect_timer.timeout.connect(self._attempt_reconnect)
+        self._preflight_worker: ConnectivityCheckWorker | None = None
 
         self._connect_card_signals()
 
@@ -168,39 +170,38 @@ class StreamController(QObject):
     def _start_stream_impl(self, preflight: bool):
         rtsp_server = self._rtsp_server_getter()
         if not rtsp_server:
+            self._set_state(StreamState.IDLE)
             self._card.show_error("请先配置 RTSP 服务器地址")
             return
         if not self._source_path:
+            self._set_state(StreamState.IDLE)
             self._card.show_error("请选择或输入视频源")
             return
         if not self._stream_name:
+            self._set_state(StreamState.IDLE)
             self._card.show_error("请输入流名称")
             return
 
         client_id = self._client_id_getter() if self._client_id_getter else ""
         if not client_id:
+            self._set_state(StreamState.IDLE)
             self._card.show_error("请先配置客户端 ID")
             return
 
         if self._source_type == "rtsp" and not self._source_path.startswith("rtsp://"):
+            self._set_state(StreamState.IDLE)
             self._card.show_error("RTSP 地址格式不正确，应以 rtsp:// 开头")
             return
         if self._source_type == "video":
             import os
             if not os.path.isfile(self._source_path):
+                self._set_state(StreamState.IDLE)
                 self._card.show_error("视频文件不存在，请检查路径")
                 return
 
         if preflight:
-            if self._source_type == "rtsp":
-                reachable, message = check_rtsp_reachable(self._source_path)
-                if not reachable:
-                    self._card.show_error(f"RTSP 源不可用：{message}")
-                    return
-            server_ok, server_message = check_rtsp_server_reachable(rtsp_server)
-            if not server_ok:
-                self._card.show_error(server_message)
-                return
+            self._start_preflight_check(rtsp_server)
+            return
 
         rtsp_url = f"{rtsp_server.rstrip('/')}/{client_id}/{self._stream_name}"
         self._rtsp_url = rtsp_url
@@ -258,6 +259,7 @@ class StreamController(QObject):
                 bitrate=bitrate,
             )
         except ValueError as e:
+            self._set_state(StreamState.IDLE)
             self._card.show_error(str(e))
             return
 
@@ -290,6 +292,61 @@ class StreamController(QObject):
         self._report_status(f"通道 {self._channel_index + 1} 开始推流")
         self._set_state(StreamState.STARTING)
 
+    def _start_preflight_check(self, rtsp_server: str):
+        if self._preflight_worker:
+            return
+        tasks = []
+        if self._source_type == "rtsp":
+            tasks.append((
+                "正在检查 RTSP 源...",
+                lambda: check_rtsp_reachable(self._source_path),
+                "RTSP 源不可用：",
+            ))
+        tasks.append((
+            "正在检查 RTSP 服务器...",
+            lambda: check_rtsp_server_reachable(rtsp_server),
+            "",
+        ))
+
+        worker = ConnectivityCheckWorker(tasks, self)
+        self._preflight_worker = worker
+        worker.stage_changed.connect(
+            lambda stage, current=worker: self._on_preflight_stage_changed(current, stage)
+        )
+        worker.check_completed.connect(
+            lambda ok, message, current=worker: self._on_preflight_completed(current, ok, message)
+        )
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+
+        self._report_status(f"通道 {self._channel_index + 1} 正在检查连接")
+        self._set_state(StreamState.STARTING, "检查连接中...")
+
+    def _on_preflight_stage_changed(self, worker: ConnectivityCheckWorker, stage: str):
+        if worker is not self._preflight_worker:
+            return
+        self._card.set_status(stage, self._state.value)
+        self._report_status(f"通道 {self._channel_index + 1} {stage}")
+
+    def _on_preflight_completed(
+        self,
+        worker: ConnectivityCheckWorker,
+        ok: bool,
+        message: str,
+    ):
+        if worker is not self._preflight_worker:
+            return
+        self._preflight_worker = None
+        if self._stop_requested:
+            self._set_state(StreamState.IDLE)
+            return
+        if not ok:
+            self._report_status(f"通道 {self._channel_index + 1} 检查失败：{message}")
+            self._set_state(StreamState.IDLE)
+            self._card.show_error(message)
+            return
+        self._start_stream_impl(preflight=False)
+
     def toggle_preview(self):
         if not self.is_streaming or not self._worker:
             return
@@ -308,6 +365,12 @@ class StreamController(QObject):
 
     def stop_stream(self):
         self._stop_requested = True
+        if self._preflight_worker:
+            self._preflight_worker.stop()
+            self._preflight_worker = None
+            self._report_status(f"通道 {self._channel_index + 1} 已取消启动")
+            self._set_state(StreamState.IDLE)
+            return
         if self._reconnect_timer.isActive():
             self._cancel_reconnect()
             return
@@ -321,6 +384,9 @@ class StreamController(QObject):
 
     def force_stop(self):
         self._stop_requested = True
+        if self._preflight_worker:
+            self._preflight_worker.stop()
+            self._preflight_worker = None
         self._cancel_reconnect(reset_state=False)
         if self._worker and self._worker.isRunning():
             self._worker.stop()
@@ -336,6 +402,8 @@ class StreamController(QObject):
             self._reconnect_reason = None
             self._report_status(f"通道 {self._channel_index + 1} 正在推流")
             self._set_state(StreamState.STREAMING)
+        elif status not in ("已停止",):
+            self._report_status(f"通道 {self._channel_index + 1} {status}")
 
     def _on_worker_error(self, msg: str):
         if self._handled_worker_failure or self._stop_requested:

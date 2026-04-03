@@ -11,6 +11,43 @@ from beaverpush.models.stream_model import StreamState
 from beaverpush.models.config import StreamConfig
 
 
+class _FakeSignal:
+    def __init__(self):
+        self._callbacks = []
+
+    def connect(self, callback):
+        self._callbacks.append(callback)
+
+    def emit(self, *args):
+        for callback in list(self._callbacks):
+            callback(*args)
+
+
+class _ImmediateConnectivityWorker:
+    def __init__(self, tasks, _parent=None):
+        self._tasks = tasks
+        self.stage_changed = _FakeSignal()
+        self.check_completed = _FakeSignal()
+        self.finished = _FakeSignal()
+
+    def start(self):
+        for stage, checker, prefix in self._tasks:
+            self.stage_changed.emit(stage)
+            ok, message = checker()
+            if not ok:
+                self.check_completed.emit(False, f"{prefix}{message}")
+                self.finished.emit()
+                return
+        self.check_completed.emit(True, "")
+        self.finished.emit()
+
+    def stop(self):
+        pass
+
+    def deleteLater(self):
+        pass
+
+
 @pytest.fixture(autouse=True)
 def _mock_reachability():
     with mock.patch(
@@ -19,6 +56,15 @@ def _mock_reachability():
     ), mock.patch(
         "beaverpush.controllers.stream_controller.check_rtsp_reachable",
         return_value=(True, "ok"),
+    ):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def _mock_connectivity_worker():
+    with mock.patch(
+        "beaverpush.controllers.stream_controller.ConnectivityCheckWorker",
+        _ImmediateConnectivityWorker,
     ):
         yield
 
@@ -451,7 +497,7 @@ class TestProgressSuppression:
 
 
 class TestReconnectBehavior:
-    def test_initial_rtsp_source_failure_shows_error_without_reconnect(self):
+    def test_rtsp_start_runs_preflight_in_background(self):
         card = _make_mock_card()
         ctrl = StreamController(
             card=card,
@@ -464,11 +510,32 @@ class TestReconnectBehavior:
         ctrl._stream_name = "s1"
 
         with mock.patch(
-            "beaverpush.controllers.stream_controller.check_rtsp_reachable",
-            return_value=(False, "连接超时"),
-        ):
+            "beaverpush.controllers.stream_controller.ConnectivityCheckWorker"
+        ) as mock_check_worker, mock.patch(
+            "beaverpush.controllers.stream_controller.build_ffmpeg_command"
+        ) as mock_build:
+            worker = mock_check_worker.return_value
             ctrl.start_stream()
 
+        mock_check_worker.assert_called_once()
+        worker.start.assert_called_once()
+        mock_build.assert_not_called()
+        assert ctrl._state == StreamState.STARTING
+
+    def test_initial_rtsp_source_failure_shows_error_without_reconnect(self):
+        card = _make_mock_card()
+        ctrl = StreamController(
+            card=card,
+            channel_index=0,
+            rtsp_server_getter=lambda: "rtsp://localhost:8554",
+            client_id_getter=lambda: "c1",
+        )
+        ctrl._source_type = "rtsp"
+        ctrl._source_path = "rtsp://source/live"
+        ctrl._stream_name = "s1"
+        worker = mock.MagicMock()
+        ctrl._preflight_worker = worker
+        ctrl._on_preflight_completed(worker, False, "RTSP 源不可用：连接超时")
         card.show_error.assert_called_with("RTSP 源不可用：连接超时")
         assert not ctrl._reconnect_timer.isActive()
 
@@ -483,13 +550,9 @@ class TestReconnectBehavior:
         ctrl._source_type = "video"
         ctrl._source_path = __file__
         ctrl._stream_name = "s1"
-
-        with mock.patch(
-            "beaverpush.controllers.stream_controller.check_rtsp_server_reachable",
-            return_value=(False, "连接被拒绝，请检查服务器是否启动。"),
-        ):
-            ctrl.start_stream()
-
+        worker = mock.MagicMock()
+        ctrl._preflight_worker = worker
+        ctrl._on_preflight_completed(worker, False, "连接被拒绝，请检查服务器是否启动。")
         card.show_error.assert_called_with("连接被拒绝，请检查服务器是否启动。")
         assert not ctrl._reconnect_timer.isActive()
 
@@ -594,6 +657,71 @@ class TestReconnectBehavior:
             ctrl.stop_stream()
 
         assert not active["value"]
+        assert ctrl._state == StreamState.IDLE
+
+    def test_preflight_failure_returns_to_idle(self):
+        card = _make_mock_card()
+        ctrl = StreamController(
+            card=card,
+            channel_index=0,
+            rtsp_server_getter=lambda: "rtsp://localhost:8554",
+            client_id_getter=lambda: "c1",
+        )
+        worker = mock.MagicMock()
+        ctrl._preflight_worker = worker
+        ctrl._state = StreamState.STARTING
+
+        ctrl._on_preflight_completed(worker, False, "连接超时")
+
+        card.show_error.assert_called_once_with("连接超时")
+        assert ctrl._state == StreamState.IDLE
+        assert ctrl._preflight_worker is None
+
+    def test_preflight_success_continues_to_start_worker(self):
+        card = _make_mock_card()
+        ctrl = StreamController(
+            card=card,
+            channel_index=0,
+            rtsp_server_getter=lambda: "rtsp://localhost:8554",
+            client_id_getter=lambda: "c1",
+        )
+        ctrl._source_type = "video"
+        ctrl._source_path = __file__
+        ctrl._stream_name = "s1"
+        ctrl._video_codec = "libx264"
+        worker = mock.MagicMock()
+        ctrl._preflight_worker = worker
+
+        with mock.patch(
+            "beaverpush.controllers.stream_controller.build_ffmpeg_command"
+        ) as mock_build, mock.patch(
+            "beaverpush.controllers.stream_controller.FFmpegWorker"
+        ), mock.patch(
+            "beaverpush.controllers.stream_controller.probe_video_info",
+            return_value={},
+        ):
+            mock_build.return_value = ["ffmpeg", "-i", "test"]
+            ctrl._on_preflight_completed(worker, True, "")
+
+        mock_build.assert_called_once()
+        assert ctrl._preflight_worker is None
+
+    def test_stop_stream_cancels_preflight_check(self):
+        card = _make_mock_card()
+        ctrl = StreamController(
+            card=card,
+            channel_index=0,
+            rtsp_server_getter=lambda: "rtsp://localhost:8554",
+            client_id_getter=lambda: "c1",
+        )
+        worker = mock.MagicMock()
+        ctrl._preflight_worker = worker
+        ctrl._state = StreamState.STARTING
+
+        ctrl.stop_stream()
+
+        worker.stop.assert_called_once()
+        assert ctrl._preflight_worker is None
         assert ctrl._state == StreamState.IDLE
 
 
