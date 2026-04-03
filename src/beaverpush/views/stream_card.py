@@ -261,15 +261,11 @@ class StreamCardView(QFrame):
 
         row.addWidget(QLabel("码率:"))
         self._bitrate_input = QLineEdit()
-        self._bitrate_input.setPlaceholderText("如 2")
+        self._bitrate_input.setPlaceholderText("如 2（单位 M）")
         self._bitrate_input.setFixedWidth(50)
         self._bitrate_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
         row.addWidget(self._bitrate_input)
-        self._bitrate_unit_combo = QComboBox()
-        self._bitrate_unit_combo.addItems(["K", "M"])
-        self._bitrate_unit_combo.setCurrentText("M")
-        self._bitrate_unit_combo.setFixedWidth(70)
-        row.addWidget(self._bitrate_unit_combo)
+        row.addWidget(QLabel("M"))
 
         row.addWidget(QLabel("重连间隔:"))
         self._source_reconnect_interval_input = QLineEdit()
@@ -281,7 +277,7 @@ class StreamCardView(QFrame):
 
         row.addWidget(QLabel("最大尝试:"))
         self._source_reconnect_max_attempts_input = QLineEdit()
-        self._source_reconnect_max_attempts_input.setPlaceholderText("3")
+        self._source_reconnect_max_attempts_input.setPlaceholderText("0")
         self._source_reconnect_max_attempts_input.setFixedWidth(45)
         self._source_reconnect_max_attempts_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._source_reconnect_max_attempts_input.setToolTip("设置为 0 表示无限重连")
@@ -408,7 +404,6 @@ class StreamCardView(QFrame):
         self._height_input.textChanged.connect(self.height_edited.emit)
         self._fps_input.textChanged.connect(self.fps_edited.emit)
         self._bitrate_input.textChanged.connect(self._emit_bitrate)
-        self._bitrate_unit_combo.currentTextChanged.connect(self._emit_bitrate)
         self._source_reconnect_interval_input.textChanged.connect(
             self.source_reconnect_interval_edited.emit
         )
@@ -569,19 +564,16 @@ class StreamCardView(QFrame):
         num = self._bitrate_input.text().strip()
         if not num:
             return ""
-        return num + self._bitrate_unit_combo.currentText()
+        return num if num.upper().endswith("M") else f"{num}M"
 
     def set_bitrate(self, br: str):
-        """从 ``"2M"`` / ``"500K"`` 格式字符串回填码率输入和单位下拉框。"""
+        """从 ``"2M"`` / ``"500K"`` 格式字符串回填码率输入框。"""
         self._bitrate_input.blockSignals(True)
-        self._bitrate_unit_combo.blockSignals(True)
         if br and br[-1:].upper() in ("K", "M"):
             self._bitrate_input.setText(br[:-1])
-            self._bitrate_unit_combo.setCurrentText(br[-1:].upper())
         else:
             self._bitrate_input.setText(br)
         self._bitrate_input.blockSignals(False)
-        self._bitrate_unit_combo.blockSignals(False)
 
     def set_advanced_mode(self, advanced: bool):
         """设置高级模式（展开高级面板）。"""
@@ -716,7 +708,6 @@ class StreamCardView(QFrame):
         self._height_input.setReadOnly(read_only)
         self._fps_input.setReadOnly(read_only)
         self._bitrate_input.setReadOnly(read_only)
-        self._bitrate_unit_combo.setEnabled(not locked)
         self._source_reconnect_interval_input.setReadOnly(read_only)
         self._source_reconnect_max_attempts_input.setReadOnly(read_only)
         self._config_locked = locked

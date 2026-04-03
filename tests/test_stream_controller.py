@@ -340,7 +340,7 @@ class TestStreamControllerConfig:
         assert ctrl._source_type == "screen"
         assert ctrl._video_codec == "libx265"
         assert ctrl._source_reconnect_interval == 5
-        assert ctrl._source_reconnect_max_attempts == 3
+        assert ctrl._source_reconnect_max_attempts == 0
         card.set_stream_name.assert_called_with("restored")
         card.set_source_type.assert_called_with("screen")
 
@@ -363,6 +363,7 @@ class TestStreamControllerConfig:
         ctrl.from_config(cfg)
         assert ctrl._source_reconnect_interval == 11
         assert ctrl._source_reconnect_max_attempts == 0
+        assert ctrl._source_path == "rtsp://source/live"
         card.set_source_reconnect_interval.assert_called_with(11)
         card.set_source_reconnect_max_attempts.assert_called_with(0)
 
@@ -535,7 +536,7 @@ class TestReconnectBehavior:
             rtsp_server_getter=lambda: "rtsp://localhost:8554",
             client_id_getter=lambda: "c1",
             server_reconnect_interval_getter=lambda: 9,
-            server_reconnect_duration_getter=lambda: 60,
+            server_reconnect_max_attempts_getter=lambda: 2,
         )
         ctrl._source_type = "video"
 
@@ -544,6 +545,26 @@ class TestReconnectBehavior:
 
         mock_start.assert_called_once_with(9000)
         assert ctrl._state == StreamState.RECONNECTING
+
+    def test_unexpected_rtsp_stop_schedules_source_reconnect(self):
+        card = _make_mock_card()
+        status_reporter = mock.MagicMock()
+        ctrl = StreamController(
+            card=card,
+            channel_index=0,
+            rtsp_server_getter=lambda: "rtsp://localhost:8554",
+            client_id_getter=lambda: "c1",
+            status_reporter=status_reporter,
+        )
+        ctrl._source_type = "rtsp"
+        ctrl._state = StreamState.STREAMING
+
+        with mock.patch.object(ctrl._reconnect_timer, "start") as mock_start:
+            ctrl._on_worker_stopped()
+
+        mock_start.assert_called_once_with(5000)
+        assert ctrl._state == StreamState.RECONNECTING
+        status_reporter.assert_called()
 
     def test_stop_stream_cancels_pending_reconnect(self):
         card = _make_mock_card()

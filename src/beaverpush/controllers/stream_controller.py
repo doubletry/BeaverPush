@@ -14,7 +14,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-import time
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
@@ -50,7 +49,8 @@ class StreamController(QObject):
         rtsp_server_getter: Callable[[], str],
         client_id_getter: Callable[[], str] | None = None,
         server_reconnect_interval_getter: Callable[[], int] | None = None,
-        server_reconnect_duration_getter: Callable[[], int] | None = None,
+        server_reconnect_max_attempts_getter: Callable[[], int] | None = None,
+        status_reporter: Callable[[str], None] | None = None,
         parent: QObject | None = None,
     ):
         super().__init__(parent)
@@ -59,7 +59,8 @@ class StreamController(QObject):
         self._rtsp_server_getter = rtsp_server_getter
         self._client_id_getter = client_id_getter
         self._server_reconnect_interval_getter = server_reconnect_interval_getter or (lambda: 5)
-        self._server_reconnect_duration_getter = server_reconnect_duration_getter or (lambda: 60)
+        self._server_reconnect_max_attempts_getter = server_reconnect_max_attempts_getter or (lambda: 0)
+        self._status_reporter = status_reporter
         self._worker: FFmpegWorker | None = None
         self._state = StreamState.IDLE
 
@@ -76,7 +77,7 @@ class StreamController(QObject):
         self._bitrate = ""
         self._rtsp_url = ""
         self._source_reconnect_interval = 5
-        self._source_reconnect_max_attempts = 3
+        self._source_reconnect_max_attempts = 0
 
         self._last_error = ""
         self._handled_worker_failure = False
@@ -84,7 +85,6 @@ class StreamController(QObject):
         self._reconnect_reason: str | None = None
         self._source_retry_count = 0
         self._server_retry_count = 0
-        self._server_retry_started_at: float | None = None
 
         self._reconnect_timer = QTimer(self)
         self._reconnect_timer.setSingleShot(True)
@@ -150,7 +150,7 @@ class StreamController(QObject):
         self._source_reconnect_interval = self._parse_positive_int(value, 5)
 
     def _on_source_reconnect_max_attempts(self, value: str):
-        self._source_reconnect_max_attempts = self._parse_non_negative_int(value, 3)
+        self._source_reconnect_max_attempts = self._parse_non_negative_int(value, 0)
 
     def _on_loop(self, val: bool):
         self._loop = val
@@ -163,7 +163,6 @@ class StreamController(QObject):
         self._cancel_reconnect(reset_state=False)
         self._source_retry_count = 0
         self._server_retry_count = 0
-        self._server_retry_started_at = None
         self._start_stream_impl(preflight=True)
 
     def _start_stream_impl(self, preflight: bool):
@@ -288,6 +287,7 @@ class StreamController(QObject):
             "推流启动: ch={} url={} source={}/{}",
             self._channel_index, rtsp_url, self._source_type, self._source_path
         )
+        self._report_status(f"通道 {self._channel_index + 1} 开始推流")
         self._set_state(StreamState.STARTING)
 
     def toggle_preview(self):
@@ -313,6 +313,7 @@ class StreamController(QObject):
             return
         if self._worker:
             logger.info("推流停止: ch={}", self._channel_index)
+            self._report_status(f"通道 {self._channel_index + 1} 停止推流")
             self._set_state(StreamState.STOPPING)
             self._worker.stop()
         else:
@@ -332,8 +333,8 @@ class StreamController(QObject):
         if status == "推流中":
             self._source_retry_count = 0
             self._server_retry_count = 0
-            self._server_retry_started_at = None
             self._reconnect_reason = None
+            self._report_status(f"通道 {self._channel_index + 1} 正在推流")
             self._set_state(StreamState.STREAMING)
 
     def _on_worker_error(self, msg: str):
@@ -349,6 +350,7 @@ class StreamController(QObject):
 
         self._handled_worker_failure = True
         logger.error("推流错误 ch={}: {}", self._channel_index, friendly)
+        self._report_status(f"通道 {self._channel_index + 1} 推流错误：{friendly.splitlines()[0]}")
         self._card.set_status("错误", "error")
         self._set_state(StreamState.ERROR)
         self._card.show_error(friendly)
@@ -366,6 +368,10 @@ class StreamController(QObject):
         if self._stop_requested:
             self._set_state(StreamState.IDLE)
             return
+        if not self._handled_worker_failure:
+            reason = self._default_reconnect_reason_for_stop()
+            if reason and self._schedule_reconnect(reason, "推流进程意外停止"):
+                return
         if self._state != StreamState.ERROR:
             self._set_state(StreamState.IDLE)
 
@@ -374,17 +380,15 @@ class StreamController(QObject):
             self._cancel_reconnect()
             return
         logger.warning("执行重连 ch={} reason={}", self._channel_index, self._reconnect_reason)
+        self._report_status(f"通道 {self._channel_index + 1} 正在执行重连")
         self._start_stream_impl(preflight=False)
 
     def _schedule_reconnect(self, reason: str, friendly: str) -> bool:
         interval = 0
         if reason == "server":
             interval = max(1, self._server_reconnect_interval_getter())
-            duration = max(0, self._server_reconnect_duration_getter())
-            now = time.monotonic()
-            if self._server_retry_started_at is None:
-                self._server_retry_started_at = now
-            elif duration and now - self._server_retry_started_at >= duration:
+            max_attempts = max(0, self._server_reconnect_max_attempts_getter())
+            if max_attempts and self._server_retry_count >= max_attempts:
                 return False
             self._server_retry_count += 1
             status = self._format_retry_status("服务器失联", interval, self._server_retry_count)
@@ -399,6 +403,7 @@ class StreamController(QObject):
 
         self._reconnect_reason = reason
         logger.warning("推流异常，准备重连 ch={} reason={} msg={}", self._channel_index, reason, friendly)
+        self._report_status(f"通道 {self._channel_index + 1} {status}")
         self._set_state(StreamState.RECONNECTING, status)
         self._reconnect_timer.start(interval * 1000)
         return True
@@ -428,6 +433,13 @@ class StreamController(QObject):
                 return "server"
             return "source"
 
+        return None
+
+    def _default_reconnect_reason_for_stop(self) -> str | None:
+        if self._source_type == "rtsp":
+            return "source"
+        if self._source_type in ("camera", "screen", "window"):
+            return "source"
         return None
 
     def _set_state(self, state: StreamState, text_override: str | None = None):
@@ -487,6 +499,11 @@ class StreamController(QObject):
         )
 
     def from_config(self, cfg: StreamConfig):
+        card = self._card
+        if cfg.title:
+            card.set_title(cfg.title)
+        card.set_source_type(cfg.source_type)
+
         self._source_type = cfg.source_type
         self._source_path = cfg.source_path
         self._stream_name = cfg.name
@@ -500,10 +517,6 @@ class StreamController(QObject):
         self._source_reconnect_interval = cfg.source_reconnect_interval
         self._source_reconnect_max_attempts = cfg.source_reconnect_max_attempts
 
-        card = self._card
-        if cfg.title:
-            card.set_title(cfg.title)
-        card.set_source_type(cfg.source_type)
         card.set_source_path(cfg.source_path)
         card.set_stream_name(cfg.name)
         card.set_loop(cfg.loop)
@@ -519,7 +532,7 @@ class StreamController(QObject):
             cfg.video_codec, cfg.width, cfg.height,
             cfg.framerate, cfg.bitrate,
             cfg.source_reconnect_interval != 5,
-            cfg.source_reconnect_max_attempts != 3,
+            cfg.source_reconnect_max_attempts != 0,
         ])
         card.set_advanced_mode(has_advanced)
 
@@ -542,3 +555,7 @@ class StreamController(QObject):
     @staticmethod
     def _format_retry_status(label: str, interval: int, attempt: int) -> str:
         return f"{label}，{interval} 秒后重连（第 {attempt} 次）"
+
+    def _report_status(self, message: str):
+        if self._status_reporter:
+            self._status_reporter(message)

@@ -276,16 +276,15 @@ class MainWindow(QMainWindow):
         bar.addWidget(self._server_reconnect_interval_input)
         bar.addWidget(QLabel("秒"))
 
-        bar.addWidget(QLabel("重连时长:"))
+        bar.addWidget(QLabel("最大尝试:"))
         self._server_reconnect_duration_input = QLineEdit()
-        self._server_reconnect_duration_input.setPlaceholderText("60")
+        self._server_reconnect_duration_input.setPlaceholderText("0")
         self._server_reconnect_duration_input.setFixedWidth(60)
         self._server_reconnect_duration_input.setToolTip("设置为 0 表示无限重连")
         self._server_reconnect_duration_input.textChanged.connect(
             self.server_reconnect_duration_changed.emit
         )
         bar.addWidget(self._server_reconnect_duration_input)
-        bar.addWidget(QLabel("秒"))
         bar.addStretch()
         return bar
 

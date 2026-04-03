@@ -26,7 +26,7 @@ class TestStreamConfig:
         assert cfg.bitrate == ""
         assert cfg.auto_start is False
         assert cfg.source_reconnect_interval == 5
-        assert cfg.source_reconnect_max_attempts == 3
+        assert cfg.source_reconnect_max_attempts == 0
 
     def test_custom_values(self):
         cfg = StreamConfig(
@@ -59,7 +59,7 @@ class TestAppConfig:
         assert cfg.server_locked is False
         assert cfg.client_id == ""
         assert cfg.server_reconnect_interval == 5
-        assert cfg.server_reconnect_duration == 60
+        assert cfg.server_reconnect_max_attempts == 0
         assert cfg.streams == []
 
     def test_config_dir_uses_beaverpush_name(self):
@@ -96,7 +96,7 @@ class TestConfigPersistence:
                 server_locked=True,
                 client_id="my_client",
                 server_reconnect_interval=7,
-                server_reconnect_duration=90,
+                server_reconnect_max_attempts=9,
             )
             stream = StreamConfig(
                 name="s1",
@@ -112,11 +112,28 @@ class TestConfigPersistence:
             assert loaded.server_locked is True
             assert loaded.client_id == "my_client"
             assert loaded.server_reconnect_interval == 7
-            assert loaded.server_reconnect_duration == 90
+            assert loaded.server_reconnect_max_attempts == 9
             assert len(loaded.streams) == 1
             assert loaded.streams[0]["name"] == "s1"
             assert loaded.streams[0]["source_reconnect_interval"] == 9
             assert loaded.streams[0]["source_reconnect_max_attempts"] == 0
+
+    def test_load_legacy_server_reconnect_duration_field(self, tmp_path):
+        config_file = tmp_path / "config.json"
+        config_file.write_text(
+            json.dumps(
+                {
+                    "rtsp_server": "rtsp://test:8554",
+                    "server_reconnect_interval": 5,
+                    "server_reconnect_duration": 12,
+                    "streams": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        with mock.patch("beaverpush.models.config.CONFIG_FILE", config_file):
+            loaded = load_config()
+        assert loaded.server_reconnect_max_attempts == 12
 
     def test_load_missing_file(self, tmp_path):
         config_file = tmp_path / "nonexistent.json"

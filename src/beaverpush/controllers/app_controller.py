@@ -55,7 +55,7 @@ class AppController(QObject):
         self._server_locked = self._config.server_locked
         self._client_id = self._config.client_id
         self._server_reconnect_interval = self._config.server_reconnect_interval
-        self._server_reconnect_duration = self._config.server_reconnect_duration
+        self._server_reconnect_max_attempts = self._config.server_reconnect_max_attempts
         self._controllers: list[StreamController] = []
         self._tray: QSystemTrayIcon | None = None
 
@@ -64,7 +64,7 @@ class AppController(QObject):
         self._window.set_server_locked(self._server_locked)
         self._window.set_client_id(self._client_id)
         self._window.set_server_reconnect_interval(self._server_reconnect_interval)
-        self._window.set_server_reconnect_duration(self._server_reconnect_duration)
+        self._window.set_server_reconnect_duration(self._server_reconnect_max_attempts)
 
         # 连接 View 信号 → Controller
         self._connect_signals()
@@ -112,7 +112,7 @@ class AppController(QObject):
         self._server_reconnect_interval = self._parse_positive_int(value, 5)
 
     def _on_server_reconnect_duration_changed(self, value: str):
-        self._server_reconnect_duration = self._parse_non_negative_int(value, 60)
+        self._server_reconnect_max_attempts = self._parse_non_negative_int(value, 0)
 
     def _on_start_all(self):
         """全部开始推流。"""
@@ -186,7 +186,8 @@ class AppController(QObject):
             rtsp_server_getter=lambda: self._rtsp_server,
             client_id_getter=lambda: self._client_id,
             server_reconnect_interval_getter=lambda: self._server_reconnect_interval,
-            server_reconnect_duration_getter=lambda: self._server_reconnect_duration,
+            server_reconnect_max_attempts_getter=lambda: self._server_reconnect_max_attempts,
+            status_reporter=self._window.set_status,
             parent=self,
         )
         self._controllers.append(ctrl)
@@ -283,7 +284,7 @@ class AppController(QObject):
             server_locked=self._server_locked,
             client_id=self._client_id,
             server_reconnect_interval=self._server_reconnect_interval,
-            server_reconnect_duration=self._server_reconnect_duration,
+            server_reconnect_max_attempts=self._server_reconnect_max_attempts,
             streams=[],
         )
         for ctrl in self._controllers:
