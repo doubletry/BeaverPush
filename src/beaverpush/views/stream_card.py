@@ -277,7 +277,7 @@ class StreamCardView(QFrame):
 
         row.addWidget(QLabel("最大尝试:"))
         self._source_reconnect_max_attempts_input = QLineEdit()
-        self._source_reconnect_max_attempts_input.setPlaceholderText("0")
+        self._source_reconnect_max_attempts_input.setPlaceholderText("0=无限")
         self._source_reconnect_max_attempts_input.setFixedWidth(45)
         self._source_reconnect_max_attempts_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._source_reconnect_max_attempts_input.setToolTip("设置为 0 表示无限重连")

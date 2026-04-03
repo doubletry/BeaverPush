@@ -111,6 +111,7 @@ def load_config() -> AppConfig:
                 server_reconnect_interval=int(data.get("server_reconnect_interval", 5) or 5),
                 server_reconnect_max_attempts=int(
                     data.get(
+                        # 兼容旧字段；旧值会被按“次数”读取并在下次保存时迁移到新字段。
                         "server_reconnect_max_attempts",
                         data.get("server_reconnect_duration", 0),
                     ) or 0
