@@ -556,12 +556,23 @@ class TestReconnectBehavior:
         ctrl._source_type = "camera"
         ctrl._source_reconnect_interval = 7
 
-        ctrl._on_worker_error("Could not open camera device")
-        assert ctrl._reconnect_timer.isActive()
+        active = {"value": False}
 
-        ctrl.stop_stream()
+        def fake_start(_ms):
+            active["value"] = True
 
-        assert not ctrl._reconnect_timer.isActive()
+        def fake_stop():
+            active["value"] = False
+
+        with mock.patch.object(ctrl._reconnect_timer, "start", side_effect=fake_start), \
+             mock.patch.object(ctrl._reconnect_timer, "stop", side_effect=fake_stop), \
+             mock.patch.object(ctrl._reconnect_timer, "isActive", side_effect=lambda: active["value"]):
+            ctrl._on_worker_error("Could not open camera device")
+            assert ctrl._reconnect_timer.isActive()
+
+            ctrl.stop_stream()
+
+        assert not active["value"]
         assert ctrl._state == StreamState.IDLE
 
 
