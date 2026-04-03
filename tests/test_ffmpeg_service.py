@@ -1,6 +1,7 @@
 """ffmpeg_service 模块单元测试"""
 
 import subprocess
+import time
 from unittest import mock
 
 from beaverpush.services.ffmpeg_service import (
@@ -417,7 +418,6 @@ class TestFFmpegWorkerInit:
         mock_proc.wait.return_value = 1
 
         def delayed_readline():
-            import time
             time.sleep(0.2)
             return b""
 

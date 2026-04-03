@@ -46,6 +46,10 @@ CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 RTSP_IO_TIMEOUT_US = "10000000"
 DEFAULT_STARTUP_TIMEOUT_SECONDS = 8.0
 RTSP_STARTUP_TIMEOUT_SECONDS = 12.0
+READY_LINE_KEYWORDS = (
+    "press [q] to stop",
+    "output #0, rtsp",
+)
 
 
 def _make_even(v: int) -> int:
@@ -380,11 +384,7 @@ class FFmpegWorker(QThread):
     @staticmethod
     def _is_ready_line(line: str) -> bool:
         line_lower = line.lower()
-        ready_keywords = (
-            "press [q] to stop",
-            "output #0, rtsp",
-        )
-        return any(keyword in line_lower for keyword in ready_keywords)
+        return any(keyword in line_lower for keyword in READY_LINE_KEYWORDS)
 
     @staticmethod
     def _is_error(line: str) -> bool:
