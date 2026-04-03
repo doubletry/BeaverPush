@@ -8,8 +8,8 @@ def test_bitrate_placeholder_uses_fixed_m_unit_text():
     card = StreamCardView(0)
     try:
         assert app is not None
-        assert card._bitrate_input.placeholderText() == "4"
-        assert card._bitrate_input.text() == "4"
+        assert card._bitrate_input.placeholderText() == ""
+        assert card._bitrate_input.text() == ""
     finally:
         card.deleteLater()
         app.processEvents()

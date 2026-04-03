@@ -81,7 +81,7 @@ The build script uses **Nuitka** to compile a standalone executable (`dist/main.
 Toggle **Advanced** mode on a channel card to configure:
 - **Codec:** libx264, h264_nvenc, hevc_nvenc, copy
 - **Resolution:** Width × Height (auto-adjusted to even numbers)
-- **Framerate** and **Bitrate** (fixed `M`, default `4M`)
+- **Framerate** and **Bitrate** (fixed `M`; leave bitrate empty for no bitrate limit)
 
 ## Project Structure
 

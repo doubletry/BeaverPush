@@ -77,7 +77,7 @@ class StreamController(QObject):
         self._width = ""
         self._height = ""
         self._framerate = ""
-        self._bitrate = "4M"
+        self._bitrate = ""
         self._rtsp_url = ""
         self._source_reconnect_interval = 5
         self._source_reconnect_max_attempts = 0
