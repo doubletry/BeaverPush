@@ -565,4 +565,5 @@ class StreamController(QObject):
 
     @staticmethod
     def _should_stop_retrying(retry_count: int, max_attempts: int) -> bool:
+        """是否达到重试上限；``max_attempts=0`` 表示无限重试。"""
         return max_attempts > 0 and retry_count >= max_attempts

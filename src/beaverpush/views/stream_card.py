@@ -560,7 +560,7 @@ class StreamCardView(QFrame):
         self._fps_input.blockSignals(False)
 
     def get_bitrate(self) -> str:
-        """返回码率字符串，如 ``"2M"``，空则返回 ``""``。"""
+        """返回标准化后的码率字符串，如 ``"2M"``，空则返回 ``""``。"""
         num = self._bitrate_input.text().strip()
         if not num:
             return ""
