@@ -35,6 +35,7 @@ class ConnectivityCheckWorker(QThread):
 
     def run(self):
         try:
+            message = ""
             for stage, checker, failure_prefix in self._tasks:
                 if self._stop_requested:
                     return
