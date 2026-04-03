@@ -420,6 +420,7 @@ class StreamController(QObject):
                 return "source"
             if any(k in lower for k in SERVER_ERROR_KEYWORDS):
                 return "server"
+            # RTSP 输入断流时 FFmpeg 的报错文本分散，未知错误默认按源异常处理。
             return "source"
 
         if self._source_type in ("camera", "screen", "window"):
