@@ -39,6 +39,7 @@ from .ffmpeg_path import get_ffmpeg, get_ffplay
 from .window_capture import WindowCaptureFeeder, ScreenCaptureFeeder, get_window_rect
 from .log_service import logger
 
+# Windows-only subprocess flag; on Unix the attribute does not exist and falls back to 0.
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 

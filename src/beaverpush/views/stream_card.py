@@ -284,7 +284,7 @@ class StreamCardView(QFrame):
         self._source_reconnect_max_attempts_input.setPlaceholderText("3")
         self._source_reconnect_max_attempts_input.setFixedWidth(45)
         self._source_reconnect_max_attempts_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._source_reconnect_max_attempts_input.setToolTip("设置为 0 表示无限次重连")
+        self._source_reconnect_max_attempts_input.setToolTip("设置为 0 表示无限重连")
         row.addWidget(self._source_reconnect_max_attempts_input)
 
         row.addStretch()

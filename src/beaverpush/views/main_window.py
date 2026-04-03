@@ -280,7 +280,7 @@ class MainWindow(QMainWindow):
         self._server_reconnect_duration_input = QLineEdit()
         self._server_reconnect_duration_input.setPlaceholderText("60")
         self._server_reconnect_duration_input.setFixedWidth(60)
-        self._server_reconnect_duration_input.setToolTip("设置为 0 表示无限时长重连")
+        self._server_reconnect_duration_input.setToolTip("设置为 0 表示无限重连")
         self._server_reconnect_duration_input.textChanged.connect(
             self.server_reconnect_duration_changed.emit
         )

@@ -27,6 +27,16 @@ from ..services.device_service import probe_video_info, get_screen_refresh_rate,
 from ..views.stream_card import StreamCardView
 from ..services.log_service import logger
 
+SERVER_ERROR_KEYWORDS = (
+    "connection refused", "no route to host", "timed out", "timeout",
+    "broken pipe", "could not write header", "error writing trailer",
+    "av_interleaved_write_frame", "connection reset",
+)
+RTSP_SOURCE_ERROR_KEYWORDS = (
+    "method describe failed", "404", "401", "could not find codec parameters",
+    "invalid data", "could not open", "end of file",
+)
+
 
 class StreamController(QObject):
     """单路推流通道控制器。"""
@@ -207,6 +217,7 @@ class StreamController(QObject):
                 codec = "libx264"
             if self._source_path.startswith("offset:"):
                 parts = self._source_path.split(":", 1)[1].split(",")
+                # rawvideo 管道模式需要完整的 offset:x,y,w,h 信息后才能推算屏幕刷新率
                 if len(parts) == 4 and not framerate:
                     framerate = str(get_screen_refresh_rate(int(parts[0]), int(parts[1])))
         elif self._source_type == "window":
@@ -377,15 +388,13 @@ class StreamController(QObject):
             elif duration and now - self._server_retry_started_at >= duration:
                 return False
             self._server_retry_count += 1
-            attempt_text = f"第 {self._server_retry_count} 次"
-            status = f"服务器失联，{interval} 秒后重连（{attempt_text}）"
+            status = self._format_retry_status("服务器失联", interval, self._server_retry_count)
         elif reason == "source":
             interval = max(1, self._source_reconnect_interval)
             if self._source_reconnect_max_attempts and self._source_retry_count >= self._source_reconnect_max_attempts:
                 return False
             self._source_retry_count += 1
-            attempt_text = f"第 {self._source_retry_count} 次"
-            status = f"源失联，{interval} 秒后重连（{attempt_text}）"
+            status = self._format_retry_status("源失联", interval, self._source_retry_count)
         else:
             return False
 
@@ -403,28 +412,19 @@ class StreamController(QObject):
 
     def _classify_reconnect_reason(self, msg: str) -> str | None:
         lower = msg.lower()
-        server_keywords = (
-            "connection refused", "no route to host", "timed out", "timeout",
-            "broken pipe", "could not write header", "error writing trailer",
-            "av_interleaved_write_frame", "connection reset",
-        )
-        rtsp_source_keywords = (
-            "method describe failed", "404", "401", "could not find codec parameters",
-            "invalid data", "could not open", "end of file",
-        )
 
         if self._source_type == "video":
-            return "server" if any(k in lower for k in server_keywords) else None
+            return "server" if any(k in lower for k in SERVER_ERROR_KEYWORDS) else None
 
         if self._source_type == "rtsp":
-            if any(k in lower for k in rtsp_source_keywords):
+            if any(k in lower for k in RTSP_SOURCE_ERROR_KEYWORDS):
                 return "source"
-            if any(k in lower for k in server_keywords):
+            if any(k in lower for k in SERVER_ERROR_KEYWORDS):
                 return "server"
             return "source"
 
         if self._source_type in ("camera", "screen", "window"):
-            if any(k in lower for k in server_keywords):
+            if any(k in lower for k in SERVER_ERROR_KEYWORDS):
                 return "server"
             return "source"
 
@@ -538,3 +538,7 @@ class StreamController(QObject):
         except (TypeError, ValueError):
             return default
         return parsed if parsed >= 0 else default
+
+    @staticmethod
+    def _format_retry_status(label: str, interval: int, attempt: int) -> str:
+        return f"{label}，{interval} 秒后重连（第 {attempt} 次）"
