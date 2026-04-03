@@ -45,7 +45,7 @@ class ConnectivityCheckWorker(QThread):
                 if not ok:
                     self.check_completed.emit(False, f"{failure_prefix}{message}")
                     return
-            self.check_completed.emit(True, "")
+            self.check_completed.emit(True, message)
         except Exception as exc:
             logger.exception("后台连通性检测异常")
             self.check_completed.emit(False, f"检测失败: {exc}")

@@ -38,7 +38,7 @@ class _ImmediateConnectivityWorker:
                 self.check_completed.emit(False, f"{prefix}{message}")
                 self.finished.emit()
                 return
-        self.check_completed.emit(True, "")
+        self.check_completed.emit(True, message)
         self.finished.emit()
 
     def stop(self):

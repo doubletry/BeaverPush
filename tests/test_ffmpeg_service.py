@@ -6,7 +6,7 @@ from unittest import mock
 
 from beaverpush.services.ffmpeg_service import (
     build_ffmpeg_command, friendly_error, _make_even, FFmpegWorker,
-    check_rtsp_server_reachable, RTSP_IO_TIMEOUT_US,
+    check_rtsp_server_reachable, RTSP_SOCKET_TIMEOUT_US,
 )
 
 
@@ -195,9 +195,9 @@ class TestBuildFfmpegCommandRtsp:
         )
         assert "-rtsp_transport" in cmd
         assert "tcp" in cmd
-        assert "-rw_timeout" in cmd
-        timeout_idx = cmd.index("-rw_timeout")
-        assert cmd[timeout_idx + 1] == RTSP_IO_TIMEOUT_US
+        assert "-stimeout" in cmd
+        timeout_idx = cmd.index("-stimeout")
+        assert cmd[timeout_idx + 1] == RTSP_SOCKET_TIMEOUT_US
 
 
 class TestBuildFfmpegCommandCamera:
