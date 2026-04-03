@@ -14,35 +14,22 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import time
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, QTimer, Signal
 
 from ..models.stream_model import StreamState
 from ..models.config import StreamConfig
 from ..services.ffmpeg_service import (
-    FFmpegWorker, build_ffmpeg_command, friendly_error,
+    FFmpegWorker, build_ffmpeg_command, friendly_error, check_rtsp_server_reachable,
 )
-from ..services.device_service import probe_video_info, get_screen_refresh_rate
+from ..services.device_service import probe_video_info, get_screen_refresh_rate, check_rtsp_reachable
 from ..views.stream_card import StreamCardView
 from ..services.log_service import logger
 
 
 class StreamController(QObject):
-    """单路推流通道控制器。
-
-    在 MVC 架构中，StreamController 是连接 StreamCardView（View）
-    和推流业务逻辑的桥梁。
-
-    Signals:
-        state_changed(StreamState): 推流状态变化时发出，供上层监听。
-
-    Args:
-        card: 关联的卡片 UI 控件。
-        channel_index: 通道索引。
-        rtsp_server_getter: 返回当前 RTSP 服务器地址的回调。
-        client_id_getter: 返回当前客户端 ID 的回调。
-        parent: 父 QObject。
-    """
+    """单路推流通道控制器。"""
 
     state_changed = Signal(object)  # StreamState
 
@@ -52,6 +39,8 @@ class StreamController(QObject):
         channel_index: int,
         rtsp_server_getter: Callable[[], str],
         client_id_getter: Callable[[], str] | None = None,
+        server_reconnect_interval_getter: Callable[[], int] | None = None,
+        server_reconnect_duration_getter: Callable[[], int] | None = None,
         parent: QObject | None = None,
     ):
         super().__init__(parent)
@@ -59,10 +48,11 @@ class StreamController(QObject):
         self._channel_index = channel_index
         self._rtsp_server_getter = rtsp_server_getter
         self._client_id_getter = client_id_getter
+        self._server_reconnect_interval_getter = server_reconnect_interval_getter or (lambda: 5)
+        self._server_reconnect_duration_getter = server_reconnect_duration_getter or (lambda: 60)
         self._worker: FFmpegWorker | None = None
         self._state = StreamState.IDLE
 
-        # ── 内部数据（与 UI 同步）──
         self._source_type = card.get_source_type() or "video"
         self._source_path = ""
         self._stream_name = ""
@@ -75,15 +65,24 @@ class StreamController(QObject):
         self._framerate = ""
         self._bitrate = ""
         self._rtsp_url = ""
+        self._source_reconnect_interval = 5
+        self._source_reconnect_max_attempts = 3
+
+        self._last_error = ""
+        self._handled_worker_failure = False
+        self._stop_requested = False
+        self._reconnect_reason: str | None = None
+        self._source_retry_count = 0
+        self._server_retry_count = 0
+        self._server_retry_started_at: float | None = None
+
+        self._reconnect_timer = QTimer(self)
+        self._reconnect_timer.setSingleShot(True)
+        self._reconnect_timer.timeout.connect(self._attempt_reconnect)
 
         self._connect_card_signals()
 
-    # ==================================================================
-    #  信号连接：View → Controller
-    # ==================================================================
-
     def _connect_card_signals(self):
-        """监听卡片 UI 的所有交互信号。"""
         c = self._card
         c.source_type_changed.connect(self._on_source_type)
         c.source_path_edited.connect(self._on_source_path)
@@ -97,15 +96,14 @@ class StreamController(QObject):
         c.height_edited.connect(self._on_height)
         c.fps_edited.connect(self._on_fps)
         c.bitrate_edited.connect(self._on_bitrate)
+        c.source_reconnect_interval_edited.connect(self._on_source_reconnect_interval)
+        c.source_reconnect_max_attempts_edited.connect(self._on_source_reconnect_max_attempts)
         c.loop_toggled.connect(self._on_loop)
         c.preview_clicked.connect(self.toggle_preview)
         c.title_edited.connect(self._on_title)
 
-    # ── 数据同步回调 ──
-
     def _on_source_type(self, key: str):
         self._source_type = key
-        # 切换源类型时清空之前选择的路径，防止残留
         self._source_path = ""
 
     def _on_source_path(self, path: str):
@@ -138,22 +136,27 @@ class StreamController(QObject):
     def _on_bitrate(self, br: str):
         self._bitrate = br
 
+    def _on_source_reconnect_interval(self, value: str):
+        self._source_reconnect_interval = self._parse_positive_int(value, 5)
+
+    def _on_source_reconnect_max_attempts(self, value: str):
+        self._source_reconnect_max_attempts = self._parse_non_negative_int(value, 3)
+
     def _on_loop(self, val: bool):
         self._loop = val
 
     def _on_title(self, title: str):
         self._title = title
 
-    # ==================================================================
-    #  推流控制
-    # ==================================================================
-
     def start_stream(self):
-        """校验参数并启动推流。
+        self._stop_requested = False
+        self._cancel_reconnect(reset_state=False)
+        self._source_retry_count = 0
+        self._server_retry_count = 0
+        self._server_retry_started_at = None
+        self._start_stream_impl(preflight=True)
 
-        校验失败时通过卡片弹窗提示用户。
-        包含对不同源类型的格式校验。
-        """
+    def _start_stream_impl(self, preflight: bool):
         rtsp_server = self._rtsp_server_getter()
         if not rtsp_server:
             self._card.show_error("请先配置 RTSP 服务器地址")
@@ -165,13 +168,11 @@ class StreamController(QObject):
             self._card.show_error("请输入流名称")
             return
 
-        # 获取客户端 ID
         client_id = self._client_id_getter() if self._client_id_getter else ""
         if not client_id:
             self._card.show_error("请先配置客户端 ID")
             return
 
-        # ── 源类型格式校验 ──
         if self._source_type == "rtsp" and not self._source_path.startswith("rtsp://"):
             self._card.show_error("RTSP 地址格式不正确，应以 rtsp:// 开头")
             return
@@ -181,11 +182,21 @@ class StreamController(QObject):
                 self._card.show_error("视频文件不存在，请检查路径")
                 return
 
+        if preflight:
+            if self._source_type == "rtsp":
+                reachable, message = check_rtsp_reachable(self._source_path)
+                if not reachable:
+                    self._card.show_error(f"RTSP 源不可用：{message}")
+                    return
+            server_ok, server_message = check_rtsp_server_reachable(rtsp_server)
+            if not server_ok:
+                self._card.show_error(server_message)
+                return
+
         rtsp_url = f"{rtsp_server.rstrip('/')}/{client_id}/{self._stream_name}"
         self._rtsp_url = rtsp_url
         codec = self._video_codec if self._video_codec != "自动" else ""
 
-        # ── 根据视频源类型解析默认参数 ──
         width = self._width
         height = self._height
         framerate = self._framerate
@@ -196,16 +207,11 @@ class StreamController(QObject):
                 codec = "libx264"
             if self._source_path.startswith("offset:"):
                 parts = self._source_path.split(":", 1)[1].split(",")
-                if len(parts) == 4:
-                    # 管道模式: 尺寸在 rawvideo 输入参数中指定，不设 width/height
-                    if not framerate:
-                        framerate = str(get_screen_refresh_rate(
-                            int(parts[0]), int(parts[1])
-                        ))
+                if len(parts) == 4 and not framerate:
+                    framerate = str(get_screen_refresh_rate(int(parts[0]), int(parts[1])))
         elif self._source_type == "window":
             if not codec:
                 codec = "libx264"
-            # 管道模式: 尺寸在 rawvideo 输入参数中指定，不设 width/height
             if not framerate:
                 framerate = "30"
         elif self._source_type == "camera":
@@ -215,7 +221,6 @@ class StreamController(QObject):
             info = probe_video_info(self._source_path)
             if not codec and info.get("codec"):
                 codec = "copy"
-            # copy 模式不需要 width/height（不能使用滤镜）
             if codec != "copy":
                 if not width and info.get("width"):
                     width = str(info["width"])
@@ -228,9 +233,8 @@ class StreamController(QObject):
                     framerate = str(round(int(num) / int(den)))
                 else:
                     framerate = fr
-        elif self._source_type == "rtsp":
-            if not codec:
-                codec = "copy"
+        elif self._source_type == "rtsp" and not codec:
+            codec = "copy"
 
         try:
             cmd = build_ffmpeg_command(
@@ -248,7 +252,7 @@ class StreamController(QObject):
             self._card.show_error(str(e))
             return
 
-        # 构建 Worker 并启动
+        self._handled_worker_failure = False
         self._worker = FFmpegWorker(self)
         self._worker.set_command(cmd)
         if self._source_type == "window" and self._source_path.startswith("hwnd:"):
@@ -263,7 +267,6 @@ class StreamController(QObject):
                 fps = int(framerate or "30")
                 self._worker.set_screen_capture(ox, oy, ow, oh, fps)
 
-        # Worker 信号 → Controller → View
         self._worker.status_changed.connect(self._on_worker_status)
         self._worker.error_occurred.connect(self._on_worker_error)
         self._worker.progress_info.connect(self._on_worker_progress)
@@ -271,13 +274,13 @@ class StreamController(QObject):
         self._worker.preview_closed.connect(self._on_preview_closed)
         self._worker.start()
 
-        logger.info("推流启动: ch={} url={} source={}/{}",
-                    self._channel_index, rtsp_url,
-                    self._source_type, self._source_path)
+        logger.info(
+            "推流启动: ch={} url={} source={}/{}",
+            self._channel_index, rtsp_url, self._source_type, self._source_path
+        )
         self._set_state(StreamState.STARTING)
 
     def toggle_preview(self):
-        """切换预览状态（仅推流中有效）。"""
         if not self.is_streaming or not self._worker:
             return
         if self._preview:
@@ -290,97 +293,181 @@ class StreamController(QObject):
             self._card.set_preview_active(True)
 
     def _on_preview_closed(self):
-        """ffplay 预览窗口被用户关闭时回调。"""
         self._preview = False
         self._card.set_preview_active(False)
 
     def stop_stream(self):
-        """请求停止推流。"""
+        self._stop_requested = True
+        if self._reconnect_timer.isActive():
+            self._cancel_reconnect()
+            return
         if self._worker:
             logger.info("推流停止: ch={}", self._channel_index)
             self._set_state(StreamState.STOPPING)
             self._worker.stop()
+        else:
+            self._set_state(StreamState.IDLE)
 
     def force_stop(self):
-        """强制停止推流（应用退出时调用，阻塞等待线程结束）。"""
+        self._stop_requested = True
+        self._cancel_reconnect(reset_state=False)
         if self._worker and self._worker.isRunning():
             self._worker.stop()
             self._worker.wait(3000)
-
-    # ==================================================================
-    #  Worker 信号处理
-    # ==================================================================
+        self._worker = None
+        self._set_state(StreamState.IDLE)
 
     def _on_worker_status(self, status: str):
-        """FFmpeg 状态变化。"""
         self._card.set_status(status, self._state.value)
         if status == "推流中":
+            self._source_retry_count = 0
+            self._server_retry_count = 0
+            self._server_retry_started_at = None
+            self._reconnect_reason = None
             self._set_state(StreamState.STREAMING)
-        elif status == "已停止":
-            self._set_state(StreamState.IDLE)
 
     def _on_worker_error(self, msg: str):
-        """FFmpeg 报错。"""
+        if self._handled_worker_failure or self._stop_requested:
+            return
+
         friendly = friendly_error(msg)
+        self._last_error = friendly
+        reason = self._classify_reconnect_reason(msg)
+        if reason and self._schedule_reconnect(reason, friendly):
+            self._handled_worker_failure = True
+            return
+
+        self._handled_worker_failure = True
         logger.error("推流错误 ch={}: {}", self._channel_index, friendly)
         self._card.set_status("错误", "error")
         self._set_state(StreamState.ERROR)
         self._card.show_error(friendly)
 
     def _on_worker_progress(self, info: dict):
-        """FFmpeg 推流进度更新。"""
-        # 不在界面上显示进度信息
         pass
 
     def _on_worker_stopped(self):
-        """FFmpeg 进程已结束。"""
         self._preview = False
         self._card.set_preview_active(False)
-        self._set_state(StreamState.IDLE)
+        self._worker = None
+        if self._reconnect_timer.isActive():
+            self._set_state(StreamState.RECONNECTING)
+            return
+        if self._stop_requested:
+            self._set_state(StreamState.IDLE)
+            return
+        if self._state != StreamState.ERROR:
+            self._set_state(StreamState.IDLE)
 
-    # ==================================================================
-    #  状态管理
-    # ==================================================================
+    def _attempt_reconnect(self):
+        if self._stop_requested:
+            self._cancel_reconnect()
+            return
+        logger.warning("执行重连 ch={} reason={}", self._channel_index, self._reconnect_reason)
+        self._start_stream_impl(preflight=False)
 
-    def _set_state(self, state: StreamState):
-        """更新推流状态并同步到卡片 UI。"""
+    def _schedule_reconnect(self, reason: str, friendly: str) -> bool:
+        interval = 0
+        if reason == "server":
+            interval = max(1, self._server_reconnect_interval_getter())
+            duration = max(0, self._server_reconnect_duration_getter())
+            now = time.monotonic()
+            if self._server_retry_started_at is None:
+                self._server_retry_started_at = now
+            elif duration and now - self._server_retry_started_at >= duration:
+                return False
+            self._server_retry_count += 1
+            attempt_text = f"第 {self._server_retry_count} 次"
+            status = f"服务器失联，{interval} 秒后重连（{attempt_text}）"
+        elif reason == "source":
+            interval = max(1, self._source_reconnect_interval)
+            if self._source_reconnect_max_attempts and self._source_retry_count >= self._source_reconnect_max_attempts:
+                return False
+            self._source_retry_count += 1
+            attempt_text = f"第 {self._source_retry_count} 次"
+            status = f"源失联，{interval} 秒后重连（{attempt_text}）"
+        else:
+            return False
+
+        self._reconnect_reason = reason
+        logger.warning("推流异常，准备重连 ch={} reason={} msg={}", self._channel_index, reason, friendly)
+        self._set_state(StreamState.RECONNECTING, status)
+        self._reconnect_timer.start(interval * 1000)
+        return True
+
+    def _cancel_reconnect(self, reset_state: bool = True):
+        self._reconnect_timer.stop()
+        self._reconnect_reason = None
+        if reset_state:
+            self._set_state(StreamState.IDLE)
+
+    def _classify_reconnect_reason(self, msg: str) -> str | None:
+        lower = msg.lower()
+        server_keywords = (
+            "connection refused", "no route to host", "timed out", "timeout",
+            "broken pipe", "could not write header", "error writing trailer",
+            "av_interleaved_write_frame", "connection reset",
+        )
+        rtsp_source_keywords = (
+            "method describe failed", "404", "401", "could not find codec parameters",
+            "invalid data", "could not open", "end of file",
+        )
+
+        if self._source_type == "video":
+            return "server" if any(k in lower for k in server_keywords) else None
+
+        if self._source_type == "rtsp":
+            if any(k in lower for k in rtsp_source_keywords):
+                return "source"
+            if any(k in lower for k in server_keywords):
+                return "server"
+            return "source"
+
+        if self._source_type in ("camera", "screen", "window"):
+            if any(k in lower for k in server_keywords):
+                return "server"
+            return "source"
+
+        return None
+
+    def _set_state(self, state: StreamState, text_override: str | None = None):
         self._state = state
-        is_streaming = state in (StreamState.STARTING, StreamState.STREAMING)
-        self._card.set_buttons_streaming(is_streaming)
-        # 推流中锁定配置项，停止后解锁
-        self._card.set_config_locked(is_streaming)
+        active_states = (
+            StreamState.STARTING, StreamState.STREAMING,
+            StreamState.RECONNECTING, StreamState.STOPPING,
+        )
+        self._card.set_buttons_streaming(state in active_states)
+        self._card.set_config_locked(state in active_states)
 
         state_text_map = {
             StreamState.IDLE: "就绪",
             StreamState.STARTING: "启动中...",
             StreamState.STREAMING: "推流中",
+            StreamState.RECONNECTING: "重连中...",
             StreamState.STOPPING: "停止中...",
             StreamState.ERROR: "错误",
         }
-        self._card.set_status(state_text_map.get(state, ""), state.value)
+        self._card.set_status(text_override or state_text_map.get(state, ""), state.value)
         self.state_changed.emit(state)
 
     @property
     def is_streaming(self) -> bool:
-        """当前是否正在推流。"""
-        return self._state in (StreamState.STARTING, StreamState.STREAMING)
+        return self._state in (
+            StreamState.STARTING,
+            StreamState.STREAMING,
+            StreamState.RECONNECTING,
+            StreamState.STOPPING,
+        )
 
     @property
     def channel_index(self) -> int:
-        """通道编号。"""
         return self._channel_index
 
     @property
     def card(self) -> StreamCardView:
-        """关联的卡片视图。"""
         return self._card
 
-    # ==================================================================
-    #  配置序列化
-    # ==================================================================
-
     def to_config(self) -> StreamConfig:
-        """将当前通道参数导出为配置对象。"""
         codec = self._video_codec if self._video_codec != "自动" else ""
         return StreamConfig(
             name=self._stream_name,
@@ -395,10 +482,11 @@ class StreamController(QObject):
             framerate=self._framerate,
             bitrate=self._bitrate,
             auto_start=self.is_streaming,
+            source_reconnect_interval=self._source_reconnect_interval,
+            source_reconnect_max_attempts=self._source_reconnect_max_attempts,
         )
 
     def from_config(self, cfg: StreamConfig):
-        """从配置对象恢复通道参数（同步到 UI）。"""
         self._source_type = cfg.source_type
         self._source_path = cfg.source_path
         self._stream_name = cfg.name
@@ -409,8 +497,9 @@ class StreamController(QObject):
         self._height = cfg.height
         self._framerate = cfg.framerate
         self._bitrate = cfg.bitrate
+        self._source_reconnect_interval = cfg.source_reconnect_interval
+        self._source_reconnect_max_attempts = cfg.source_reconnect_max_attempts
 
-        # 同步到 View
         card = self._card
         if cfg.title:
             card.set_title(cfg.title)
@@ -423,10 +512,29 @@ class StreamController(QObject):
         card.set_height(cfg.height)
         card.set_fps(cfg.framerate)
         card.set_bitrate(cfg.bitrate)
+        card.set_source_reconnect_interval(cfg.source_reconnect_interval)
+        card.set_source_reconnect_max_attempts(cfg.source_reconnect_max_attempts)
 
-        # 有高级参数时自动展开高级面板
         has_advanced = any([
             cfg.video_codec, cfg.width, cfg.height,
             cfg.framerate, cfg.bitrate,
+            cfg.source_reconnect_interval != 5,
+            cfg.source_reconnect_max_attempts != 3,
         ])
         card.set_advanced_mode(has_advanced)
+
+    @staticmethod
+    def _parse_positive_int(value: str, default: int) -> int:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return default
+        return parsed if parsed > 0 else default
+
+    @staticmethod
+    def _parse_non_negative_int(value: str, default: int) -> int:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return default
+        return parsed if parsed >= 0 else default

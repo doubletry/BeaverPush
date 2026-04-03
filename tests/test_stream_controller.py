@@ -11,6 +11,18 @@ from beaverpush.models.stream_model import StreamState
 from beaverpush.models.config import StreamConfig
 
 
+@pytest.fixture(autouse=True)
+def _mock_reachability():
+    with mock.patch(
+        "beaverpush.controllers.stream_controller.check_rtsp_server_reachable",
+        return_value=(True, "ok"),
+    ), mock.patch(
+        "beaverpush.controllers.stream_controller.check_rtsp_reachable",
+        return_value=(True, "ok"),
+    ):
+        yield
+
+
 def _make_mock_card():
     """创建模拟的 StreamCardView"""
     card = mock.MagicMock()
@@ -23,6 +35,7 @@ def _make_mock_card():
         "browse_clicked", "refresh_clicked", "start_clicked", "stop_clicked",
         "remove_clicked", "stream_name_edited", "codec_changed",
         "width_edited", "height_edited", "fps_edited", "bitrate_edited",
+        "source_reconnect_interval_edited", "source_reconnect_max_attempts_edited",
         "loop_toggled", "preview_clicked", "title_edited",
     ]:
         getattr(card, sig).connect = mock.MagicMock()
@@ -291,6 +304,21 @@ class TestStreamControllerConfig:
         cfg = ctrl.to_config()
         assert cfg.video_codec == ""
 
+    def test_to_config_includes_reconnect_settings(self):
+        card = _make_mock_card()
+        ctrl = StreamController(
+            card=card,
+            channel_index=0,
+            rtsp_server_getter=lambda: "rtsp://localhost:8554",
+            client_id_getter=lambda: "c1",
+        )
+        ctrl._source_reconnect_interval = 9
+        ctrl._source_reconnect_max_attempts = 0
+
+        cfg = ctrl.to_config()
+        assert cfg.source_reconnect_interval == 9
+        assert cfg.source_reconnect_max_attempts == 0
+
     def test_from_config(self):
         card = _make_mock_card()
         ctrl = StreamController(
@@ -311,8 +339,32 @@ class TestStreamControllerConfig:
         assert ctrl._stream_name == "restored"
         assert ctrl._source_type == "screen"
         assert ctrl._video_codec == "libx265"
+        assert ctrl._source_reconnect_interval == 5
+        assert ctrl._source_reconnect_max_attempts == 3
         card.set_stream_name.assert_called_with("restored")
         card.set_source_type.assert_called_with("screen")
+
+    def test_from_config_restores_reconnect_settings(self):
+        card = _make_mock_card()
+        ctrl = StreamController(
+            card=card,
+            channel_index=0,
+            rtsp_server_getter=lambda: "rtsp://localhost:8554",
+            client_id_getter=lambda: "c1",
+        )
+        cfg = StreamConfig(
+            name="restored",
+            source_type="rtsp",
+            source_path="rtsp://source/live",
+            source_reconnect_interval=11,
+            source_reconnect_max_attempts=0,
+        )
+
+        ctrl.from_config(cfg)
+        assert ctrl._source_reconnect_interval == 11
+        assert ctrl._source_reconnect_max_attempts == 0
+        card.set_source_reconnect_interval.assert_called_with(11)
+        card.set_source_reconnect_max_attempts.assert_called_with(0)
 
 
 class TestStreamControllerState:
@@ -395,6 +447,122 @@ class TestProgressSuppression:
         ctrl._source_type = "screen"
         ctrl._on_worker_progress({"time": "00:01:00", "fps": "30"})
         # No exception should be raised
+
+
+class TestReconnectBehavior:
+    def test_initial_rtsp_source_failure_shows_error_without_reconnect(self):
+        card = _make_mock_card()
+        ctrl = StreamController(
+            card=card,
+            channel_index=0,
+            rtsp_server_getter=lambda: "rtsp://localhost:8554",
+            client_id_getter=lambda: "c1",
+        )
+        ctrl._source_type = "rtsp"
+        ctrl._source_path = "rtsp://source/live"
+        ctrl._stream_name = "s1"
+
+        with mock.patch(
+            "beaverpush.controllers.stream_controller.check_rtsp_reachable",
+            return_value=(False, "连接超时"),
+        ):
+            ctrl.start_stream()
+
+        card.show_error.assert_called_with("RTSP 源不可用：连接超时")
+        assert not ctrl._reconnect_timer.isActive()
+
+    def test_initial_server_failure_shows_error_without_reconnect(self):
+        card = _make_mock_card()
+        ctrl = StreamController(
+            card=card,
+            channel_index=0,
+            rtsp_server_getter=lambda: "rtsp://localhost:8554",
+            client_id_getter=lambda: "c1",
+        )
+        ctrl._source_type = "video"
+        ctrl._source_path = __file__
+        ctrl._stream_name = "s1"
+
+        with mock.patch(
+            "beaverpush.controllers.stream_controller.check_rtsp_server_reachable",
+            return_value=(False, "连接被拒绝，请检查服务器是否启动。"),
+        ):
+            ctrl.start_stream()
+
+        card.show_error.assert_called_with("连接被拒绝，请检查服务器是否启动。")
+        assert not ctrl._reconnect_timer.isActive()
+
+    def test_source_failure_schedules_reconnect(self):
+        card = _make_mock_card()
+        ctrl = StreamController(
+            card=card,
+            channel_index=0,
+            rtsp_server_getter=lambda: "rtsp://localhost:8554",
+            client_id_getter=lambda: "c1",
+        )
+        ctrl._source_type = "camera"
+        ctrl._source_reconnect_interval = 7
+
+        with mock.patch.object(ctrl._reconnect_timer, "start") as mock_start:
+            ctrl._on_worker_error("Could not open camera device")
+
+        mock_start.assert_called_once_with(7000)
+        assert ctrl._state == StreamState.RECONNECTING
+        card.show_error.assert_not_called()
+
+    def test_source_failure_stops_after_max_attempts(self):
+        card = _make_mock_card()
+        ctrl = StreamController(
+            card=card,
+            channel_index=0,
+            rtsp_server_getter=lambda: "rtsp://localhost:8554",
+            client_id_getter=lambda: "c1",
+        )
+        ctrl._source_type = "camera"
+        ctrl._source_reconnect_max_attempts = 1
+        ctrl._source_retry_count = 1
+
+        ctrl._on_worker_error("Could not open camera device")
+
+        assert ctrl._state == StreamState.ERROR
+        card.show_error.assert_called_once()
+
+    def test_server_failure_schedules_reconnect_with_global_policy(self):
+        card = _make_mock_card()
+        ctrl = StreamController(
+            card=card,
+            channel_index=0,
+            rtsp_server_getter=lambda: "rtsp://localhost:8554",
+            client_id_getter=lambda: "c1",
+            server_reconnect_interval_getter=lambda: 9,
+            server_reconnect_duration_getter=lambda: 60,
+        )
+        ctrl._source_type = "video"
+
+        with mock.patch.object(ctrl._reconnect_timer, "start") as mock_start:
+            ctrl._on_worker_error("Connection refused")
+
+        mock_start.assert_called_once_with(9000)
+        assert ctrl._state == StreamState.RECONNECTING
+
+    def test_stop_stream_cancels_pending_reconnect(self):
+        card = _make_mock_card()
+        ctrl = StreamController(
+            card=card,
+            channel_index=0,
+            rtsp_server_getter=lambda: "rtsp://localhost:8554",
+            client_id_getter=lambda: "c1",
+        )
+        ctrl._source_type = "camera"
+        ctrl._source_reconnect_interval = 7
+
+        ctrl._on_worker_error("Could not open camera device")
+        assert ctrl._reconnect_timer.isActive()
+
+        ctrl.stop_stream()
+
+        assert not ctrl._reconnect_timer.isActive()
+        assert ctrl._state == StreamState.IDLE
 
 
 class TestPreviewToggle:

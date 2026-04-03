@@ -30,11 +30,13 @@ class StreamState(Enum):
         STARTING:  正在启动 FFmpeg 进程
         STREAMING: FFmpeg 正在正常推流
         STOPPING:  正在停止推流（等待进程退出）
+        RECONNECTING: 正在等待自动重连
         ERROR:     出现错误，推流已终止
     """
 
     IDLE = "idle"
     STARTING = "starting"
     STREAMING = "streaming"
+    RECONNECTING = "reconnecting"
     STOPPING = "stopping"
     ERROR = "error"

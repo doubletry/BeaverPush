@@ -24,6 +24,8 @@ from dataclasses import dataclass
 
 from .ffmpeg_path import get_ffprobe
 
+CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
 
 @dataclass
 class CameraInfo:
@@ -258,7 +260,7 @@ def probe_video_info(file_path: str) -> dict:
                 file_path,
             ],
             capture_output=True, text=True, timeout=10,
-            creationflags=subprocess.CREATE_NO_WINDOW,
+            creationflags=CREATE_NO_WINDOW,
         )
         data = json.loads(result.stdout)
         for stream in data.get("streams", []):
@@ -291,7 +293,7 @@ def check_rtsp_reachable(url: str, timeout: int = 5) -> tuple[bool, str]:
         result = subprocess.run(
             [get_ffprobe(), "-v", "error", "-rtsp_transport", "tcp", "-i", url],
             capture_output=True, text=True, timeout=timeout,
-            creationflags=subprocess.CREATE_NO_WINDOW,
+            creationflags=CREATE_NO_WINDOW,
         )
         stderr = result.stderr.lower()
         if "connection refused" in stderr or "no route to host" in stderr:

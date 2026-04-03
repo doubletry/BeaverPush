@@ -5,6 +5,7 @@ from unittest import mock
 
 from beaverpush.services.ffmpeg_service import (
     build_ffmpeg_command, friendly_error, _make_even, FFmpegWorker,
+    check_rtsp_server_reachable,
 )
 
 
@@ -362,3 +363,30 @@ class TestFriendlyError:
     def test_unknown_error_passthrough(self):
         result = friendly_error("some random message")
         assert result == "some random message"
+
+
+class TestCheckRtspServerReachable:
+    def test_success(self):
+        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        with mock.patch(
+            "beaverpush.services.ffmpeg_service.subprocess.run",
+            return_value=completed,
+        ):
+            ok, message = check_rtsp_server_reachable("rtsp://localhost:8554")
+        assert ok is True
+        assert "连接成功" in message
+
+    def test_refused(self):
+        completed = subprocess.CompletedProcess(
+            args=[],
+            returncode=1,
+            stdout="",
+            stderr="Connection refused",
+        )
+        with mock.patch(
+            "beaverpush.services.ffmpeg_service.subprocess.run",
+            return_value=completed,
+        ):
+            ok, message = check_rtsp_server_reachable("rtsp://localhost:8554")
+        assert ok is False
+        assert "连接被拒绝" in message

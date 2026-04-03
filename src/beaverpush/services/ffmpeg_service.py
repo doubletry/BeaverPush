@@ -39,6 +39,8 @@ from .ffmpeg_path import get_ffmpeg, get_ffplay
 from .window_capture import WindowCaptureFeeder, ScreenCaptureFeeder, get_window_rect
 from .log_service import logger
 
+CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
 
 def _make_even(v: int) -> int:
     """将值调整为最近的偶数（FFmpeg 要求宽高为偶数）。"""
@@ -133,7 +135,7 @@ class FFmpegWorker(QThread):
                 stdin=subprocess.PIPE if use_pipe else None,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
-                creationflags=subprocess.CREATE_NO_WINDOW,
+                creationflags=CREATE_NO_WINDOW,
             )
 
             if use_pipe and self._window_hwnd:
@@ -236,7 +238,7 @@ class FFmpegWorker(QThread):
                 ],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                creationflags=subprocess.CREATE_NO_WINDOW,
+                creationflags=CREATE_NO_WINDOW,
             )
         except Exception:
             pass
@@ -537,3 +539,39 @@ def friendly_error(msg: str) -> str:
         if keyword in lower:
             return f"{friendly}\n\n原始信息:\n{msg}"
     return msg
+
+
+def check_rtsp_server_reachable(rtsp_server: str, timeout: int = 10) -> tuple[bool, str]:
+    """检测 RTSP 推流服务器是否可写。"""
+    try:
+        result = subprocess.run(
+            [
+                get_ffmpeg(), "-y",
+                "-f", "lavfi", "-i", "testsrc=duration=1:size=320x240:rate=1",
+                "-c:v", "libx264", "-preset", "ultrafast",
+                "-t", "1",
+                "-f", "rtsp", "-rtsp_transport", "tcp",
+                f"{rtsp_server.rstrip('/')}/__connection_test__",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            creationflags=CREATE_NO_WINDOW,
+        )
+        stderr = result.stderr.lower()
+        if result.returncode == 0:
+            return True, "连接成功！RTSP 服务器可达。"
+        if "connection refused" in stderr:
+            return False, "连接被拒绝，请检查服务器是否启动。"
+        if "no route" in stderr or "unreachable" in stderr:
+            return False, "主机不可达，请检查网络和地址。"
+        if "timeout" in stderr or "timed out" in stderr:
+            return False, "连接超时。"
+        return False, friendly_error(result.stderr.strip() or "RTSP 服务器不可用")
+    except subprocess.TimeoutExpired:
+        return False, "连接超时，请检查地址和网络。"
+    except FileNotFoundError:
+        return False, "未找到 ffmpeg，请确认已安装并添加到 PATH。"
+    except Exception as e:
+        logger.exception("RTSP 服务器连接测试异常")
+        return False, f"测试失败: {e}"

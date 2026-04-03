@@ -25,6 +25,8 @@ class TestStreamConfig:
         assert cfg.framerate == ""
         assert cfg.bitrate == ""
         assert cfg.auto_start is False
+        assert cfg.source_reconnect_interval == 5
+        assert cfg.source_reconnect_max_attempts == 3
 
     def test_custom_values(self):
         cfg = StreamConfig(
@@ -38,12 +40,16 @@ class TestStreamConfig:
             height="1080",
             framerate="30",
             bitrate="2M",
+            source_reconnect_interval=8,
+            source_reconnect_max_attempts=0,
         )
         assert cfg.name == "stream1"
         assert cfg.title == "我的通道"
         assert cfg.source_type == "video"
         assert cfg.width == "1920"
         assert cfg.bitrate == "2M"
+        assert cfg.source_reconnect_interval == 8
+        assert cfg.source_reconnect_max_attempts == 0
 
 
 class TestAppConfig:
@@ -52,6 +58,8 @@ class TestAppConfig:
         assert cfg.rtsp_server == ""
         assert cfg.server_locked is False
         assert cfg.client_id == ""
+        assert cfg.server_reconnect_interval == 5
+        assert cfg.server_reconnect_duration == 60
         assert cfg.streams == []
 
     def test_config_dir_uses_beaverpush_name(self):
@@ -87,8 +95,15 @@ class TestConfigPersistence:
                 rtsp_server="rtsp://test:8554",
                 server_locked=True,
                 client_id="my_client",
+                server_reconnect_interval=7,
+                server_reconnect_duration=90,
             )
-            stream = StreamConfig(name="s1", source_type="screen")
+            stream = StreamConfig(
+                name="s1",
+                source_type="screen",
+                source_reconnect_interval=9,
+                source_reconnect_max_attempts=0,
+            )
             cfg.add_stream(stream)
             save_config(cfg)
 
@@ -96,8 +111,12 @@ class TestConfigPersistence:
             assert loaded.rtsp_server == "rtsp://test:8554"
             assert loaded.server_locked is True
             assert loaded.client_id == "my_client"
+            assert loaded.server_reconnect_interval == 7
+            assert loaded.server_reconnect_duration == 90
             assert len(loaded.streams) == 1
             assert loaded.streams[0]["name"] == "s1"
+            assert loaded.streams[0]["source_reconnect_interval"] == 9
+            assert loaded.streams[0]["source_reconnect_max_attempts"] == 0
 
     def test_load_missing_file(self, tmp_path):
         config_file = tmp_path / "nonexistent.json"

@@ -78,6 +78,8 @@ class StreamCardView(QFrame):
     height_edited       = Signal(str)
     fps_edited          = Signal(str)
     bitrate_edited      = Signal(str)
+    source_reconnect_interval_edited = Signal(str)
+    source_reconnect_max_attempts_edited = Signal(str)
     loop_toggled        = Signal(bool)
     preview_clicked      = Signal()
     title_edited        = Signal(str)
@@ -223,7 +225,7 @@ class StreamCardView(QFrame):
         return row
 
     def _build_advanced_panel(self) -> QWidget:
-        """构建高级配置面板（编码、分辨率、帧率、码率）。"""
+        """构建高级配置面板（编码、分辨率、帧率、码率、重连）。"""
         panel = QWidget()
         row = QHBoxLayout(panel)
         row.setContentsMargins(0, 0, 0, 0)
@@ -268,6 +270,22 @@ class StreamCardView(QFrame):
         self._bitrate_unit_combo.setCurrentText("M")
         self._bitrate_unit_combo.setFixedWidth(70)
         row.addWidget(self._bitrate_unit_combo)
+
+        row.addWidget(QLabel("重连间隔:"))
+        self._source_reconnect_interval_input = QLineEdit()
+        self._source_reconnect_interval_input.setPlaceholderText("5")
+        self._source_reconnect_interval_input.setFixedWidth(45)
+        self._source_reconnect_interval_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        row.addWidget(self._source_reconnect_interval_input)
+        row.addWidget(QLabel("秒"))
+
+        row.addWidget(QLabel("最大尝试:"))
+        self._source_reconnect_max_attempts_input = QLineEdit()
+        self._source_reconnect_max_attempts_input.setPlaceholderText("3")
+        self._source_reconnect_max_attempts_input.setFixedWidth(45)
+        self._source_reconnect_max_attempts_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._source_reconnect_max_attempts_input.setToolTip("设置为 0 表示无限次重连")
+        row.addWidget(self._source_reconnect_max_attempts_input)
 
         row.addStretch()
         return panel
@@ -391,6 +409,12 @@ class StreamCardView(QFrame):
         self._fps_input.textChanged.connect(self.fps_edited.emit)
         self._bitrate_input.textChanged.connect(self._emit_bitrate)
         self._bitrate_unit_combo.currentTextChanged.connect(self._emit_bitrate)
+        self._source_reconnect_interval_input.textChanged.connect(
+            self.source_reconnect_interval_edited.emit
+        )
+        self._source_reconnect_max_attempts_input.textChanged.connect(
+            self.source_reconnect_max_attempts_edited.emit
+        )
         # 复选框
         self._loop_check.toggled.connect(self.loop_toggled.emit)
         # 预览按钮
@@ -566,6 +590,22 @@ class StreamCardView(QFrame):
         self._settings_combo.blockSignals(False)
         self._advanced_panel.setVisible(advanced)
 
+    def get_source_reconnect_interval(self) -> str:
+        return self._source_reconnect_interval_input.text()
+
+    def set_source_reconnect_interval(self, interval: int | str):
+        self._source_reconnect_interval_input.blockSignals(True)
+        self._source_reconnect_interval_input.setText(str(interval))
+        self._source_reconnect_interval_input.blockSignals(False)
+
+    def get_source_reconnect_max_attempts(self) -> str:
+        return self._source_reconnect_max_attempts_input.text()
+
+    def set_source_reconnect_max_attempts(self, attempts: int | str):
+        self._source_reconnect_max_attempts_input.blockSignals(True)
+        self._source_reconnect_max_attempts_input.setText(str(attempts))
+        self._source_reconnect_max_attempts_input.blockSignals(False)
+
     def get_loop(self) -> bool:
         return self._loop_check.isChecked()
 
@@ -617,6 +657,7 @@ class StreamCardView(QFrame):
             "idle": Theme.OVERLAY0,
             "starting": Theme.OVERLAY0,
             "streaming": Theme.GREEN,
+            "reconnecting": Theme.YELLOW,
             "error": Theme.RED,
             "stopping": Theme.YELLOW,
         }
@@ -676,6 +717,8 @@ class StreamCardView(QFrame):
         self._fps_input.setReadOnly(read_only)
         self._bitrate_input.setReadOnly(read_only)
         self._bitrate_unit_combo.setEnabled(not locked)
+        self._source_reconnect_interval_input.setReadOnly(read_only)
+        self._source_reconnect_max_attempts_input.setReadOnly(read_only)
         self._config_locked = locked
         # 推流中时禁止编辑标题
         if locked:
