@@ -261,7 +261,7 @@ class StreamCardView(QFrame):
 
         row.addWidget(QLabel("码率:"))
         self._bitrate_input = QLineEdit()
-        self._bitrate_input.setPlaceholderText("如 2 （单位 M）")
+        self._bitrate_input.setPlaceholderText("如 2")
         self._bitrate_input.setFixedWidth(92)
         self._bitrate_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
         row.addWidget(self._bitrate_input)

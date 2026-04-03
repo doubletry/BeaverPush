@@ -267,6 +267,7 @@ class StreamController(QObject):
 
         self._handled_worker_failure = False
         self._worker = FFmpegWorker(self)
+        self._worker.set_source_type(self._source_type)
         self._worker.set_command(cmd)
         if self._source_type == "window" and self._source_path.startswith("hwnd:"):
             hwnd = int(self._source_path.split(":")[1])

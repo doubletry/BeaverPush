@@ -5,7 +5,7 @@ from unittest import mock
 
 from beaverpush.services.ffmpeg_service import (
     build_ffmpeg_command, friendly_error, _make_even, FFmpegWorker,
-    check_rtsp_server_reachable,
+    check_rtsp_server_reachable, RTSP_IO_TIMEOUT_US,
 )
 
 
@@ -194,6 +194,9 @@ class TestBuildFfmpegCommandRtsp:
         )
         assert "-rtsp_transport" in cmd
         assert "tcp" in cmd
+        assert "-rw_timeout" in cmd
+        timeout_idx = cmd.index("-rw_timeout")
+        assert cmd[timeout_idx + 1] == RTSP_IO_TIMEOUT_US
 
 
 class TestBuildFfmpegCommandCamera:
@@ -350,7 +353,7 @@ class TestFFmpegWorkerInit:
             worker._preview_monitor_thread.join(timeout=2)
             mock_signal.emit.assert_not_called()
 
-    def test_status_turns_streaming_only_after_progress(self):
+    def test_status_turns_streaming_after_progress(self):
         worker = FFmpegWorker()
         worker.set_command(["ffmpeg", "-i", "test"])
         statuses = []
@@ -376,6 +379,59 @@ class TestFFmpegWorkerInit:
         assert statuses[:2] == ["正在启动推流...", "等待数据..."]
         assert statuses[2] == "推流中"
         assert progress
+
+    def test_status_turns_streaming_after_ready_line(self):
+        worker = FFmpegWorker()
+        worker.set_command(["ffmpeg", "-i", "test"])
+        statuses = []
+        worker.status_changed.connect(statuses.append)
+
+        mock_proc = mock.MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.wait.return_value = 0
+        mock_proc.stderr.readline.side_effect = [
+            b"Press [q] to stop, [?] for help\n",
+            b"",
+        ]
+        mock_proc.stderr.read.return_value = b""
+
+        with mock.patch(
+            "beaverpush.services.ffmpeg_service.subprocess.Popen",
+            return_value=mock_proc,
+        ):
+            worker.run()
+
+        assert statuses[:3] == ["正在启动推流...", "等待数据...", "推流中"]
+
+    def test_rtsp_startup_timeout_terminates_process(self):
+        worker = FFmpegWorker()
+        worker.set_source_type("rtsp")
+        worker.set_command(["ffmpeg", "-i", "test"])
+        worker._startup_timeout_seconds = 0.01
+        statuses = []
+        worker.status_changed.connect(statuses.append)
+
+        mock_proc = mock.MagicMock()
+        mock_proc.returncode = 1
+        mock_proc.poll.return_value = None
+        mock_proc.wait.return_value = 1
+
+        def delayed_readline():
+            import time
+            time.sleep(0.2)
+            return b""
+
+        mock_proc.stderr.readline.side_effect = delayed_readline
+        mock_proc.stderr.read.return_value = b""
+
+        with mock.patch(
+            "beaverpush.services.ffmpeg_service.subprocess.Popen",
+            return_value=mock_proc,
+        ):
+            worker.run()
+
+        mock_proc.terminate.assert_called()
+        assert "推流中" not in statuses
 
     def test_stop_does_not_block_waiting_for_process_exit(self):
         worker = FFmpegWorker()

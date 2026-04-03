@@ -32,6 +32,7 @@ FFmpeg 推流服务模块
 import subprocess
 import re
 import threading
+import time
 
 from PySide6.QtCore import QThread, Signal
 
@@ -41,6 +42,9 @@ from .log_service import logger
 
 # Windows-only subprocess flag; on Unix the attribute does not exist and falls back to 0.
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+RTSP_IO_TIMEOUT_US = "10000000"
+DEFAULT_STARTUP_TIMEOUT_SECONDS = 8.0
+RTSP_STARTUP_TIMEOUT_SECONDS = 12.0
 
 
 def _make_even(v: int) -> int:
@@ -93,6 +97,16 @@ class FFmpegWorker(QThread):
         self._screen_fps: int = 30
         self._preview_monitor_thread: threading.Thread | None = None
         self._streaming_announced = False
+        self._source_type: str = "video"
+        self._startup_timeout_seconds = DEFAULT_STARTUP_TIMEOUT_SECONDS
+        self._startup_watchdog_thread: threading.Thread | None = None
+
+    def set_source_type(self, source_type: str):
+        self._source_type = source_type
+        if source_type == "rtsp":
+            self._startup_timeout_seconds = RTSP_STARTUP_TIMEOUT_SECONDS
+        else:
+            self._startup_timeout_seconds = DEFAULT_STARTUP_TIMEOUT_SECONDS
 
     def set_command(self, cmd: list[str]):
         self._cmd = cmd
@@ -141,6 +155,7 @@ class FFmpegWorker(QThread):
                 creationflags=CREATE_NO_WINDOW,
             )
             self.status_changed.emit("等待数据...")
+            self._start_startup_watchdog()
 
             if use_pipe and self._window_hwnd:
                 self._capture_feeder = WindowCaptureFeeder(
@@ -170,10 +185,10 @@ class FFmpegWorker(QThread):
 
                 info = self._parse_progress(line_str)
                 if info:
-                    if not self._streaming_announced:
-                        self._streaming_announced = True
-                        self.status_changed.emit("推流中")
+                    self._mark_streaming()
                     self.progress_info.emit(info)
+                elif self._is_ready_line(line_str):
+                    self._mark_streaming()
 
                 if self._is_error(line_str):
                     self.error_occurred.emit(line_str)
@@ -289,6 +304,55 @@ class FFmpegWorker(QThread):
                 pass
             self._process = None
 
+    def _start_startup_watchdog(self):
+        timeout = self._startup_timeout_seconds
+        proc = self._process
+        if not proc or timeout <= 0:
+            return
+
+        def _watch():
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                current = self._process
+                if (
+                    self._stop_flag
+                    or self._streaming_announced
+                    or not current
+                    or current.poll() is not None
+                ):
+                    return
+                time.sleep(0.1)
+
+            current = self._process
+            if (
+                self._stop_flag
+                or self._streaming_announced
+                or not current
+                or current.poll() is not None
+            ):
+                return
+
+            if self._source_type == "rtsp":
+                msg = "等待 RTSP 源数据超时，请检查源地址、网络或设备状态。"
+            else:
+                msg = "启动超时，长时间未收到数据，请检查输入源状态。"
+            logger.warning("FFmpeg 启动超时 source_type={}", self._source_type)
+            self.error_occurred.emit(msg)
+            try:
+                current.terminate()
+            except Exception:
+                pass
+
+        thread = threading.Thread(target=_watch, daemon=True)
+        thread.start()
+        self._startup_watchdog_thread = thread
+
+    def _mark_streaming(self):
+        if self._streaming_announced:
+            return
+        self._streaming_announced = True
+        self.status_changed.emit("推流中")
+
     @staticmethod
     def _parse_progress(line: str) -> dict | None:
         if "frame=" not in line and "size=" not in line:
@@ -307,6 +371,15 @@ class FFmpegWorker(QThread):
             if m:
                 info[key] = m.group(1).strip()
         return info if info else None
+
+    @staticmethod
+    def _is_ready_line(line: str) -> bool:
+        line_lower = line.lower()
+        ready_keywords = (
+            "press [q] to stop",
+            "output #0, rtsp",
+        )
+        return any(keyword in line_lower for keyword in ready_keywords)
 
     @staticmethod
     def _is_error(line: str) -> bool:
@@ -395,7 +468,11 @@ def build_ffmpeg_command(
         cmd += ["-f", "dshow", "-i", f"video={source_path}"]
 
     elif source_type == "rtsp":
-        cmd += ["-rtsp_transport", "tcp", "-i", source_path]
+        cmd += [
+            "-rtsp_transport", "tcp",
+            "-rw_timeout", RTSP_IO_TIMEOUT_US,
+            "-i", source_path,
+        ]
 
     elif source_type == "screen":
         # 屏幕捕获：使用 rawvideo 管道模式，通过 BitBlt + DrawIconEx
