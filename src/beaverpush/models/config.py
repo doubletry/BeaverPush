@@ -5,8 +5,8 @@
 负责应用配置的加载和保存，使用 JSON 文件存储。
 
 配置文件位置:
-    - Windows: ``%APPDATA%/PushClient/config.json``
-    - 其他:    ``~/PushClient/config.json``
+    - Windows: ``%APPDATA%/BeaverPush/config.json``
+    - 其他:    ``~/BeaverPush/config.json``
 
 数据结构:
     - ``StreamConfig`` : 单路推流通道的参数（源类型、路径、编码器等）
@@ -25,7 +25,7 @@ import os
 from pathlib import Path
 from dataclasses import dataclass, field, asdict, fields as dataclass_fields
 
-CONFIG_DIR = Path(os.environ.get("APPDATA", Path.home())) / "PushClient"
+CONFIG_DIR = Path(os.environ.get("APPDATA", Path.home())) / "BeaverPush"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 
 

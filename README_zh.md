@@ -36,7 +36,7 @@
 poetry install
 
 # 运行应用
-poetry run push-client
+poetry run beaverpush
 # 或
 poetry run python -m beaverpush.main
 ```

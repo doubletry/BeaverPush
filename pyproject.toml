@@ -1,5 +1,5 @@
 [project]
-name = "push-client"
+name = "beaverpush"
 version = "0.1.0"
 description = ""
 authors = [

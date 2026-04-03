@@ -54,6 +54,10 @@ class TestAppConfig:
         assert cfg.client_id == ""
         assert cfg.streams == []
 
+    def test_config_dir_uses_beaverpush_name(self):
+        from beaverpush.models.config import CONFIG_DIR
+        assert CONFIG_DIR.name == "BeaverPush"
+
     def test_has_client_id(self):
         """验证 AppConfig 包含 client_id 字段（无全局默认参数）"""
         cfg = AppConfig(client_id="client01")

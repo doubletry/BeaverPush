@@ -36,7 +36,7 @@ Download the latest installer from [GitHub Releases](https://github.com/doubletr
 poetry install
 
 # Run the application
-poetry run push-client
+poetry run beaverpush
 # or
 poetry run python -m beaverpush.main
 ```
