@@ -150,4 +150,4 @@ src/beaverpush/
 
 ## 许可协议
 
-MIT
+[MIT](LICENSE)

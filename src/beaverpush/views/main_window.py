@@ -291,6 +291,7 @@ class MainWindow(QMainWindow):
             self.server_reconnect_max_attempts_changed.emit
         )
         bar.addWidget(self._server_reconnect_max_attempts_input)
+        bar.addWidget(QLabel("次"))
         bar.addStretch()
         return bar
 
@@ -350,7 +351,7 @@ class MainWindow(QMainWindow):
 
         self._cards_container = QWidget()
         self._cards_layout = QVBoxLayout(self._cards_container)
-        self._cards_layout.setContentsMargins(0, 0, 6, 0)
+        self._cards_layout.setContentsMargins(0, 0, 0, 0)
         self._cards_layout.setSpacing(10)
         self._cards_layout.addStretch()  # 底部弹簧
 

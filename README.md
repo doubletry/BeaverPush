@@ -150,4 +150,4 @@ Automated builds are triggered by pushing a version tag (e.g. `v1.0.0`). The Git
 
 ## License
 
-MIT
+[MIT](LICENSE)

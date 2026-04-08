@@ -230,6 +230,15 @@ class StreamCardView(QFrame):
 
         return row
 
+    @staticmethod
+    def _make_separator() -> QFrame:
+        """创建垂直分隔线，用于区分高级设置中的参数组。"""
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.VLine)
+        sep.setStyleSheet(f"color: {Theme.SURFACE2};")
+        sep.setFixedWidth(1)
+        return sep
+
     def _build_advanced_panel(self) -> QWidget:
         """构建高级配置面板（编码、分辨率、帧率、码率、重连）。"""
         panel = QWidget()
@@ -237,6 +246,7 @@ class StreamCardView(QFrame):
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(8)
 
+        # ── 编码 ──
         lbl = QLabel("编码:")
         lbl.setFixedWidth(50)
         row.addWidget(lbl)
@@ -245,6 +255,9 @@ class StreamCardView(QFrame):
         self._codec_combo.addItems(CODEC_OPTIONS)
         row.addWidget(self._codec_combo)
 
+        row.addWidget(self._make_separator())
+
+        # ── 分辨率 ──
         row.addWidget(QLabel("分辨率:"))
         self._width_input = QLineEdit()
         self._width_input.setPlaceholderText("宽")
@@ -258,6 +271,9 @@ class StreamCardView(QFrame):
         self._height_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
         row.addWidget(self._height_input)
 
+        row.addWidget(self._make_separator())
+
+        # ── 帧率 ──
         row.addWidget(QLabel("帧率:"))
         self._fps_input = QLineEdit()
         self._fps_input.setPlaceholderText("30")
@@ -265,20 +281,25 @@ class StreamCardView(QFrame):
         self._fps_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
         row.addWidget(self._fps_input)
 
+        row.addWidget(self._make_separator())
+
+        # ── 码率 ──
         row.addWidget(QLabel("码率:"))
         self._bitrate_input = QLineEdit()
         self._bitrate_input.setPlaceholderText("")
-        self._bitrate_input.setFixedWidth(92)
+        self._bitrate_input.setFixedWidth(50)
         self._bitrate_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._bitrate_input.setToolTip("码率单位固定为 M，例如输入 2 表示 2M")
         row.addWidget(self._bitrate_input)
         row.addWidget(QLabel("M"))
 
-        # 重连配置（仅对 RTSP 视频源有效，其他源类型时隐藏）
+        # ── 重连配置（仅对 RTSP 视频源有效，其他源类型时隐藏）──
         self._reconnect_container = QWidget()
         reconnect_layout = QHBoxLayout(self._reconnect_container)
         reconnect_layout.setContentsMargins(0, 0, 0, 0)
         reconnect_layout.setSpacing(8)
+
+        reconnect_layout.addWidget(self._make_separator())
 
         reconnect_layout.addWidget(QLabel("重连间隔:"))
         self._source_reconnect_interval_input = QLineEdit()
@@ -295,6 +316,7 @@ class StreamCardView(QFrame):
         self._source_reconnect_max_attempts_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._source_reconnect_max_attempts_input.setToolTip("设置为 0 表示无限重连")
         reconnect_layout.addWidget(self._source_reconnect_max_attempts_input)
+        reconnect_layout.addWidget(QLabel("次"))
 
         row.addWidget(self._reconnect_container)
         # 默认隐藏重连配置（仅 RTSP 源时显示）

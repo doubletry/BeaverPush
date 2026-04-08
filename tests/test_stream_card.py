@@ -16,6 +16,17 @@ def test_bitrate_placeholder_uses_fixed_m_unit_text():
         app.processEvents()
 
 
+def test_bitrate_input_width_matches_fps_input():
+    """码率输入框宽度应与帧率输入框相同"""
+    app = QApplication.instance() or QApplication([])
+    card = StreamCardView(0)
+    try:
+        assert card._bitrate_input.maximumWidth() == card._fps_input.maximumWidth()
+    finally:
+        card.deleteLater()
+        app.processEvents()
+
+
 class TestStreamNameValidation:
     """验证流名称输入框的字符校验"""
 
