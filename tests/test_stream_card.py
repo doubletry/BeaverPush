@@ -109,8 +109,7 @@ class TestSourcePathsCache:
         card = StreamCardView(0)
         try:
             # Default source type is video, reconnect should be hidden
-            # since _on_source_type_changed isn't called at init, verify container exists
-            assert hasattr(card, "_reconnect_container")
+            assert not card._reconnect_container.isVisible()
         finally:
             card.deleteLater()
             app.processEvents()

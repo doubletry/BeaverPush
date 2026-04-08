@@ -365,12 +365,12 @@ def get_motherboard_uuid() -> str:
                         return line
         else:
             # Linux: 优先尝试 DMI product_uuid（需要 root）
+            from pathlib import Path
             for path_str in (
                 "/sys/class/dmi/id/product_uuid",
                 "/etc/machine-id",
             ):
                 try:
-                    from pathlib import Path
                     content = Path(path_str).read_text().strip()
                     if content:
                         return content

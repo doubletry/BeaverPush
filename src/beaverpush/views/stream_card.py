@@ -17,9 +17,8 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Signal, Qt
+from PySide6.QtCore import Signal, Qt, QRegularExpression
 from PySide6.QtGui import QFont, QRegularExpressionValidator
-from PySide6.QtCore import QRegularExpression
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QVBoxLayout, QLabel, QLineEdit,
     QComboBox, QPushButton, QCheckBox, QFileDialog, QMessageBox,
