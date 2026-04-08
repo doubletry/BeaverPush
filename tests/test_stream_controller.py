@@ -834,3 +834,169 @@ class TestPreviewToggle:
         ctrl._on_preview_closed()
         assert ctrl._preview is False
         card.set_preview_active.assert_called_with(False)
+
+
+class TestDefaultStreamName:
+    """验证默认流名称和有效名称逻辑"""
+
+    def test_default_stream_name_used_when_no_custom_name(self):
+        card = _make_mock_card()
+        ctrl = StreamController(
+            card=card, channel_index=0,
+            rtsp_server_getter=lambda: "rtsp://localhost:8554",
+            client_id_getter=lambda: "c1",
+        )
+        ctrl.set_default_stream_name("stream1")
+        assert ctrl.get_effective_stream_name() == "stream1"
+
+    def test_custom_name_overrides_default(self):
+        card = _make_mock_card()
+        ctrl = StreamController(
+            card=card, channel_index=0,
+            rtsp_server_getter=lambda: "rtsp://localhost:8554",
+            client_id_getter=lambda: "c1",
+        )
+        ctrl.set_default_stream_name("stream1")
+        ctrl._stream_name = "my_stream"
+        assert ctrl.get_effective_stream_name() == "my_stream"
+
+    def test_effective_name_empty_when_both_empty(self):
+        card = _make_mock_card()
+        ctrl = StreamController(
+            card=card, channel_index=0,
+            rtsp_server_getter=lambda: "rtsp://localhost:8554",
+            client_id_getter=lambda: "c1",
+        )
+        assert ctrl.get_effective_stream_name() == ""
+
+    def test_default_name_persisted_on_start(self):
+        """开始推流时，如果用户未输入流名称，默认名称应被持久化"""
+        card = _make_mock_card()
+        ctrl = StreamController(
+            card=card, channel_index=0,
+            rtsp_server_getter=lambda: "rtsp://localhost:8554",
+            client_id_getter=lambda: "c1",
+        )
+        ctrl._source_type = "video"
+        ctrl._source_path = __file__
+        ctrl._stream_name = ""
+        ctrl._default_stream_name = "stream1"
+        ctrl._video_codec = "libx264"
+
+        with mock.patch(
+            "beaverpush.controllers.stream_controller.build_ffmpeg_command"
+        ) as mock_build, mock.patch(
+            "beaverpush.controllers.stream_controller.FFmpegWorker"
+        ), mock.patch(
+            "beaverpush.controllers.stream_controller.probe_video_info",
+            return_value={},
+        ):
+            mock_build.return_value = ["ffmpeg", "-i", "test"]
+            ctrl.start_stream()
+
+        # 默认名称应被持久化到 _stream_name
+        assert ctrl._stream_name == "stream1"
+        card.set_stream_name.assert_called_with("stream1")
+
+    def test_to_config_uses_effective_name(self):
+        card = _make_mock_card()
+        ctrl = StreamController(
+            card=card, channel_index=0,
+            rtsp_server_getter=lambda: "",
+            client_id_getter=lambda: "",
+        )
+        ctrl._stream_name = ""
+        ctrl._default_stream_name = "stream2"
+        cfg = ctrl.to_config()
+        assert cfg.name == "stream2"
+
+
+class TestDuplicateStreamNameCheck:
+    """验证重复流名称检查"""
+
+    def test_duplicate_name_blocks_start(self):
+        card = _make_mock_card()
+        ctrl = StreamController(
+            card=card, channel_index=0,
+            rtsp_server_getter=lambda: "rtsp://localhost:8554",
+            client_id_getter=lambda: "c1",
+            duplicate_name_checker=lambda name, idx: name == "stream1",
+        )
+        ctrl._source_type = "video"
+        ctrl._source_path = __file__
+        ctrl._stream_name = "stream1"
+
+        ctrl.start_stream()
+        card.show_error.assert_called_once()
+        assert "重复" in card.show_error.call_args[0][0]
+
+    def test_unique_name_allows_start(self):
+        card = _make_mock_card()
+        ctrl = StreamController(
+            card=card, channel_index=0,
+            rtsp_server_getter=lambda: "rtsp://localhost:8554",
+            client_id_getter=lambda: "c1",
+            duplicate_name_checker=lambda name, idx: False,
+        )
+        ctrl._source_type = "video"
+        ctrl._source_path = __file__
+        ctrl._stream_name = "unique_stream"
+        ctrl._video_codec = "libx264"
+
+        with mock.patch(
+            "beaverpush.controllers.stream_controller.build_ffmpeg_command"
+        ) as mock_build, mock.patch(
+            "beaverpush.controllers.stream_controller.FFmpegWorker"
+        ), mock.patch(
+            "beaverpush.controllers.stream_controller.probe_video_info",
+            return_value={},
+        ):
+            mock_build.return_value = ["ffmpeg", "-i", "test"]
+            ctrl.start_stream()
+            mock_build.assert_called_once()
+
+
+class TestSourcePathsCache:
+    """验证视频源地址缓存逻辑"""
+
+    def test_source_path_cached_on_type_change(self):
+        card = _make_mock_card()
+        ctrl = StreamController(
+            card=card, channel_index=0,
+            rtsp_server_getter=lambda: "",
+            client_id_getter=lambda: "",
+        )
+        ctrl._source_type = "video"
+        ctrl._source_path = "/path/to/video.mp4"
+        ctrl._source_paths_cache["video"] = "/path/to/video.mp4"
+
+        # Switch to rtsp
+        ctrl._on_source_type("rtsp")
+        # Old path should be cached
+        assert ctrl._source_paths_cache.get("video") == "/path/to/video.mp4"
+
+        # Switch back to video
+        ctrl._on_source_type("video")
+        assert ctrl._source_path == "/path/to/video.mp4"
+
+    def test_source_path_updated_in_cache(self):
+        card = _make_mock_card()
+        ctrl = StreamController(
+            card=card, channel_index=0,
+            rtsp_server_getter=lambda: "",
+            client_id_getter=lambda: "",
+        )
+        ctrl._source_type = "rtsp"
+        ctrl._on_source_path("rtsp://192.168.1.1/live")
+        assert ctrl._source_paths_cache["rtsp"] == "rtsp://192.168.1.1/live"
+
+    def test_device_selected_updates_cache(self):
+        card = _make_mock_card()
+        ctrl = StreamController(
+            card=card, channel_index=0,
+            rtsp_server_getter=lambda: "",
+            client_id_getter=lambda: "",
+        )
+        ctrl._source_type = "camera"
+        ctrl._on_device_selected("device:cam0")
+        assert ctrl._source_paths_cache["camera"] == "device:cam0"

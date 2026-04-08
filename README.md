@@ -16,6 +16,10 @@ A multi-channel RTSP streaming desktop client built with **PySide6 + MVC archite
 - 🔒 **Server lock** to prevent accidental RTSP address changes
 - 🔄 **Loop playback** for local video files
 - 🖱️ **Editable channel names** with click-to-edit titles
+- 🔑 **Auto-detect client ID** using motherboard UUID
+- ✅ **Input validation** for client ID and stream names (ASCII-safe characters only)
+- 🔄 **Auto-reconnect** with configurable interval for RTSP sources
+- 💾 **Auto-save on successful connection test**
 
 ## Download
 
@@ -27,24 +31,24 @@ Download the latest installer from [GitHub Releases](https://github.com/doubletr
 
 - **Python** ≥ 3.12
 - **FFmpeg** / **ffprobe** / **ffplay** in `PATH` (or place them in a `ffmpeg/` subdirectory)
-- **Poetry** package manager
+- **uv** package manager
 
 ### Install & Run
 
 ```bash
 # Install dependencies
-poetry install
+uv sync
 
 # Run the application
-poetry run beaverpush
+uv run beaverpush
 # or
-poetry run python -m beaverpush.main
+uv run python -m beaverpush.main
 ```
 
 ### Run Tests
 
 ```bash
-poetry run pytest
+uv run pytest
 ```
 
 ### Build from Source
@@ -61,10 +65,10 @@ The build script uses **Nuitka** to compile a standalone executable (`dist/main.
 ## Usage
 
 1. Enter the RTSP server address (e.g. `rtsp://192.168.1.100:8554`)
-2. Set a Client ID to identify this streaming endpoint
+2. Set a Client ID to identify this streaming endpoint (auto-detected from motherboard UUID if left empty)
 3. Click **Add Channel** to create a streaming channel
 4. Select a video source type and configure parameters
-5. Click **Start** to begin streaming
+5. Click **Start** to begin streaming (stream names default to `stream1`, `stream2`, etc. if left empty)
 
 ### Video Source Types
 
@@ -138,7 +142,7 @@ src/beaverpush/
 
 Automated builds are triggered by pushing a version tag (e.g. `v1.0.0`). The GitHub Actions workflow:
 
-1. Sets up Python 3.12 + Poetry
+1. Sets up Python 3.12 + uv
 2. Downloads FFmpeg binaries
 3. Installs Inno Setup 6
 4. Compiles with Nuitka and packages the installer
@@ -146,4 +150,4 @@ Automated builds are triggered by pushing a version tag (e.g. `v1.0.0`). The Git
 
 ## License
 
-MIT
+[MIT](LICENSE)

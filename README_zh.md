@@ -16,6 +16,10 @@
 - 🔒 **服务器地址锁定**，防止误修改
 - 🔄 **本地视频循环播放**
 - 🖱️ **可编辑通道名称**，点击标题即可修改
+- 🔑 **自动检测客户端 ID**，使用主板 UUID
+- ✅ **输入校验**，客户端 ID 和流名称仅允许 ASCII 安全字符
+- 🔄 **自动重连**，RTSP 源支持可配置的重连间隔
+- 💾 **连接测试成功后自动保存配置**
 
 ## 下载安装
 
@@ -27,24 +31,24 @@
 
 - **Python** ≥ 3.12
 - **FFmpeg** / **ffprobe** / **ffplay** 在 `PATH` 中（或放置在 `ffmpeg/` 子目录下）
-- **Poetry** 包管理器
+- **uv** 包管理器
 
 ### 安装与运行
 
 ```bash
 # 安装依赖
-poetry install
+uv sync
 
 # 运行应用
-poetry run beaverpush
+uv run beaverpush
 # 或
-poetry run python -m beaverpush.main
+uv run python -m beaverpush.main
 ```
 
 ### 运行测试
 
 ```bash
-poetry run pytest
+uv run pytest
 ```
 
 ### 从源码构建
@@ -61,10 +65,10 @@ poetry run pytest
 ## 使用说明
 
 1. 填写 RTSP 服务器地址（如 `rtsp://192.168.1.100:8554`）
-2. 设置客户端 ID，用于区分不同推流端
+2. 设置客户端 ID，用于区分不同推流端（留空时自动使用主板 UUID）
 3. 点击 **添加通道** 创建推流通道
 4. 选择视频源类型并配置参数
-5. 点击 **开始推流**
+5. 点击 **开始推流**（流名称留空时自动分配 `stream1`、`stream2` 等）
 
 ### 视频源类型
 
@@ -138,7 +142,7 @@ src/beaverpush/
 
 推送版本标签（如 `v1.0.0`）时自动触发 GitHub Actions 构建流程：
 
-1. 配置 Python 3.12 + Poetry 环境
+1. 配置 Python 3.12 + uv 环境
 2. 下载 FFmpeg 二进制文件
 3. 安装 Inno Setup 6
 4. 使用 Nuitka 编译并打包安装程序
@@ -146,4 +150,4 @@ src/beaverpush/
 
 ## 许可协议
 
-MIT
+[MIT](LICENSE)

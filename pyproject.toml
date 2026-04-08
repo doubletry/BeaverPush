@@ -3,26 +3,26 @@ name = "beaverpush"
 version = "0.1.0"
 description = ""
 authors = [
-    {name = "alblue",email = "hslixdu@outlook.com"}
+    {name = "alblue", email = "hslixdu@outlook.com"}
 ]
 readme = "README.md"
 requires-python = ">=3.12,<3.15"
 dependencies = [
-    "pyside6 (>=6.10.2,<7.0.0)",
-    "psutil (>=7.2.2,<8.0.0)",
-    "loguru (>=0.7.0,<1.0.0)",
-    "nuitka (>=4.0.3,<5.0.0)"
+    "pyside6>=6.10.2,<7.0.0",
+    "psutil>=7.2.2,<8.0.0",
+    "loguru>=0.7.0,<1.0.0",
+    "nuitka>=4.0.3,<5.0.0",
 ]
 
 [project.scripts]
 beaverpush = "beaverpush.main:main"
 
-[tool.poetry]
-packages = [{include = "beaverpush", from = "src"}]
-
 [build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/beaverpush"]
 
 [tool.pyright]
 venvPath = "."
@@ -30,5 +30,5 @@ venv = ".venv"
 
 [dependency-groups]
 dev = [
-    "pytest (>=9.0.2,<10.0.0)"
+    "pytest>=9.0.2,<10.0.0",
 ]

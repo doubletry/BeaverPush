@@ -17,8 +17,8 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Signal, Qt
-from PySide6.QtGui import QFont
+from PySide6.QtCore import Signal, Qt, QRegularExpression
+from PySide6.QtGui import QFont, QRegularExpressionValidator
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QVBoxLayout, QLabel, QLineEdit,
     QComboBox, QPushButton, QCheckBox, QFileDialog, QMessageBox,
@@ -94,6 +94,8 @@ class StreamCardView(QFrame):
         super().__init__(parent)
         self._channel_index = channel_index
         self._config_locked = False
+        self._source_paths_cache: dict[str, str] = {}  # 每种源类型保存的路径
+        self._current_source_type: str = "video"  # 当前源类型
 
         # 应用卡片级样式
         self.setFrameShape(QFrame.Shape.StyledPanel)
@@ -213,6 +215,10 @@ class StreamCardView(QFrame):
         row.addWidget(lbl)
         self._stream_name_input = QLineEdit()
         self._stream_name_input.setPlaceholderText("stream1")
+        # 只允许 ASCII 字母、数字以及 . _ - 三种特殊符号
+        self._stream_name_input.setValidator(
+            QRegularExpressionValidator(QRegularExpression(r"[A-Za-z0-9._\-]*"))
+        )
         row.addWidget(self._stream_name_input, 1)
 
         # 配置模式切换
@@ -224,6 +230,15 @@ class StreamCardView(QFrame):
 
         return row
 
+    @staticmethod
+    def _make_separator() -> QFrame:
+        """创建垂直分隔线，用于区分高级设置中的参数组。"""
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.VLine)
+        sep.setStyleSheet(f"color: {Theme.SURFACE2};")
+        sep.setFixedWidth(1)
+        return sep
+
     def _build_advanced_panel(self) -> QWidget:
         """构建高级配置面板（编码、分辨率、帧率、码率、重连）。"""
         panel = QWidget()
@@ -231,6 +246,7 @@ class StreamCardView(QFrame):
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(8)
 
+        # ── 编码 ──
         lbl = QLabel("编码:")
         lbl.setFixedWidth(50)
         row.addWidget(lbl)
@@ -239,6 +255,9 @@ class StreamCardView(QFrame):
         self._codec_combo.addItems(CODEC_OPTIONS)
         row.addWidget(self._codec_combo)
 
+        row.addWidget(self._make_separator())
+
+        # ── 分辨率 ──
         row.addWidget(QLabel("分辨率:"))
         self._width_input = QLineEdit()
         self._width_input.setPlaceholderText("宽")
@@ -252,6 +271,9 @@ class StreamCardView(QFrame):
         self._height_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
         row.addWidget(self._height_input)
 
+        row.addWidget(self._make_separator())
+
+        # ── 帧率 ──
         row.addWidget(QLabel("帧率:"))
         self._fps_input = QLineEdit()
         self._fps_input.setPlaceholderText("30")
@@ -259,30 +281,46 @@ class StreamCardView(QFrame):
         self._fps_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
         row.addWidget(self._fps_input)
 
+        row.addWidget(self._make_separator())
+
+        # ── 码率 ──
         row.addWidget(QLabel("码率:"))
         self._bitrate_input = QLineEdit()
         self._bitrate_input.setPlaceholderText("")
-        self._bitrate_input.setFixedWidth(92)
+        self._bitrate_input.setFixedWidth(50)
         self._bitrate_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._bitrate_input.setToolTip("码率单位固定为 M，例如输入 2 表示 2M")
         row.addWidget(self._bitrate_input)
         row.addWidget(QLabel("M"))
 
-        row.addWidget(QLabel("重连间隔:"))
+        # ── 重连配置（仅对 RTSP 视频源有效，其他源类型时隐藏）──
+        self._reconnect_container = QWidget()
+        reconnect_layout = QHBoxLayout(self._reconnect_container)
+        reconnect_layout.setContentsMargins(0, 0, 0, 0)
+        reconnect_layout.setSpacing(8)
+
+        reconnect_layout.addWidget(self._make_separator())
+
+        reconnect_layout.addWidget(QLabel("重连间隔:"))
         self._source_reconnect_interval_input = QLineEdit()
         self._source_reconnect_interval_input.setPlaceholderText("5")
         self._source_reconnect_interval_input.setFixedWidth(45)
         self._source_reconnect_interval_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        row.addWidget(self._source_reconnect_interval_input)
-        row.addWidget(QLabel("秒"))
+        reconnect_layout.addWidget(self._source_reconnect_interval_input)
+        reconnect_layout.addWidget(QLabel("秒"))
 
-        row.addWidget(QLabel("最大尝试:"))
+        reconnect_layout.addWidget(QLabel("最大尝试:"))
         self._source_reconnect_max_attempts_input = QLineEdit()
         self._source_reconnect_max_attempts_input.setPlaceholderText("0=无限")
         self._source_reconnect_max_attempts_input.setFixedWidth(45)
         self._source_reconnect_max_attempts_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._source_reconnect_max_attempts_input.setToolTip("设置为 0 表示无限重连")
-        row.addWidget(self._source_reconnect_max_attempts_input)
+        reconnect_layout.addWidget(self._source_reconnect_max_attempts_input)
+        reconnect_layout.addWidget(QLabel("次"))
+
+        row.addWidget(self._reconnect_container)
+        # 默认隐藏重连配置（仅 RTSP 源时显示）
+        self._reconnect_container.setVisible(False)
 
         row.addStretch()
         return panel
@@ -428,6 +466,11 @@ class StreamCardView(QFrame):
         is_file_or_rtsp = key in ("video", "rtsp")
         is_device = key in ("camera", "screen", "window")
 
+        # 保存当前源类型的输入值（在切换前）
+        prev_key = getattr(self, "_current_source_type", None)
+        if prev_key and prev_key in ("video", "rtsp"):
+            self._source_paths_cache[prev_key] = self._source_input.text()
+
         # 切换输入 / 设备下拉框
         self._source_input.setVisible(is_file_or_rtsp)
         self._device_combo.setVisible(is_device)
@@ -435,9 +478,16 @@ class StreamCardView(QFrame):
         self._refresh_btn.setVisible(is_device)
         self._loop_check.setVisible(key == "video")
 
-        # 清空路径/设备选择，避免残留上一种源类型的值
+        # 重连配置仅对 RTSP 视频源有效
+        self._reconnect_container.setVisible(key == "rtsp")
+
+        # 恢复之前保存的源路径（而不是清空）
         self._source_input.blockSignals(True)
-        self._source_input.clear()
+        if key in ("video", "rtsp"):
+            cached = self._source_paths_cache.get(key, "")
+            self._source_input.setText(cached)
+        else:
+            self._source_input.clear()
         self._source_input.blockSignals(False)
         self._device_combo.blockSignals(True)
         self._device_combo.setCurrentIndex(-1)
@@ -449,6 +499,7 @@ class StreamCardView(QFrame):
         elif key == "rtsp":
             self._source_input.setPlaceholderText("RTSP 地址")
 
+        self._current_source_type = key
         self.source_type_changed.emit(key)
 
     def _on_device_selected(self, idx: int):
@@ -527,6 +578,10 @@ class StreamCardView(QFrame):
         self._stream_name_input.blockSignals(True)
         self._stream_name_input.setText(name)
         self._stream_name_input.blockSignals(False)
+
+    def set_stream_name_placeholder(self, placeholder: str):
+        """设置流名称输入框的 placeholder 文本。"""
+        self._stream_name_input.setPlaceholderText(placeholder)
 
     def get_codec(self) -> str:
         return self._codec_combo.currentText()

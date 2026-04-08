@@ -54,6 +54,7 @@ class StreamController(QObject):
         server_reconnect_interval_getter: Callable[[], int] | None = None,
         server_reconnect_max_attempts_getter: Callable[[], int] | None = None,
         status_reporter: Callable[[str], None] | None = None,
+        duplicate_name_checker: Callable[[str, int], bool] | None = None,
         parent: QObject | None = None,
     ):
         super().__init__(parent)
@@ -64,12 +65,15 @@ class StreamController(QObject):
         self._server_reconnect_interval_getter = server_reconnect_interval_getter or (lambda: 5)
         self._server_reconnect_max_attempts_getter = server_reconnect_max_attempts_getter or (lambda: 0)
         self._status_reporter = status_reporter
+        self._duplicate_name_checker = duplicate_name_checker
         self._worker: FFmpegWorker | None = None
         self._state = StreamState.IDLE
 
         self._source_type = card.get_source_type() or "video"
         self._source_path = ""
+        self._source_paths_cache: dict[str, str] = {}  # 每种源类型保存的路径
         self._stream_name = ""
+        self._default_stream_name = ""  # 由 AppController 分配的默认流名称
         self._title = ""
         self._loop = False
         self._preview = False
@@ -117,20 +121,32 @@ class StreamController(QObject):
         c.title_edited.connect(self._on_title)
 
     def _on_source_type(self, key: str):
+        # 保存当前源类型的路径
+        if self._source_type:
+            self._source_paths_cache[self._source_type] = self._source_path
         self._source_type = key
-        self._source_path = ""
+        # 恢复目标源类型之前保存的路径
+        self._source_path = self._source_paths_cache.get(key, "")
 
     def _on_source_path(self, path: str):
         self._source_path = path
+        # 同步更新缓存
+        if self._source_type:
+            self._source_paths_cache[self._source_type] = path
 
     def _on_device_selected(self, value: str):
         self._source_path = value
+        # 同步更新缓存
+        if self._source_type:
+            self._source_paths_cache[self._source_type] = value
 
     def _on_browse(self):
         path = self._card.browse_file()
         if path:
             self._source_path = path
             self._card.set_source_path(path)
+            if self._source_type:
+                self._source_paths_cache[self._source_type] = path
 
     def _on_stream_name(self, name: str):
         self._stream_name = name
@@ -179,9 +195,20 @@ class StreamController(QObject):
             self._set_state(StreamState.IDLE)
             self._card.show_error("请选择或输入视频源")
             return
-        if not self._stream_name:
+
+        # 使用有效流名称（用户输入 > 默认名称）
+        effective_name = self.get_effective_stream_name()
+        if not effective_name:
             self._set_state(StreamState.IDLE)
             self._card.show_error("请输入流名称")
+            return
+
+        # 校验流名称是否与其他通道重复
+        if self._duplicate_name_checker and self._duplicate_name_checker(
+            effective_name, self._channel_index
+        ):
+            self._set_state(StreamState.IDLE)
+            self._card.show_error(f"流名称 \"{effective_name}\" 与其他通道重复，请修改")
             return
 
         client_id = self._client_id_getter() if self._client_id_getter else ""
@@ -205,7 +232,12 @@ class StreamController(QObject):
             self._start_preflight_check(rtsp_server)
             return
 
-        rtsp_url = f"{rtsp_server.rstrip('/')}/{client_id}/{self._stream_name}"
+        # 持久化有效流名称：如果用户未输入，将默认名称写入 _stream_name
+        if not self._stream_name and effective_name:
+            self._stream_name = effective_name
+            self._card.set_stream_name(effective_name)
+
+        rtsp_url = f"{rtsp_server.rstrip('/')}/{client_id}/{effective_name}"
         self._rtsp_url = rtsp_url
         codec = self._video_codec if self._video_codec != "自动" else ""
 
@@ -553,10 +585,18 @@ class StreamController(QObject):
     def card(self) -> StreamCardView:
         return self._card
 
+    def set_default_stream_name(self, name: str):
+        """由 AppController 设置默认流名称，当用户未填写时使用。"""
+        self._default_stream_name = name
+
+    def get_effective_stream_name(self) -> str:
+        """获取有效流名称：用户设置的优先，否则使用默认名称。"""
+        return self._stream_name or self._default_stream_name
+
     def to_config(self) -> StreamConfig:
         codec = self._video_codec if self._video_codec != "自动" else ""
         return StreamConfig(
-            name=self._stream_name,
+            name=self.get_effective_stream_name(),
             title=self._title,
             source_type=self._source_type,
             source_path=self._source_path,

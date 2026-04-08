@@ -8,8 +8,8 @@
 
 .NOTES
     前置条件：
-      - Python >= 3.12（通过 Poetry 管理虚拟环境）
-      - poetry install 已执行
+      - Python >= 3.12（通过 uv 管理虚拟环境）
+      - uv sync 已执行
       - Nuitka 已安装（包含在 pyproject.toml 依赖中）
 #>
 
@@ -60,7 +60,7 @@ Write-Host ""
 
 # ── 执行编译 ──
 Write-Host "[BUILD] 开始编译..." -ForegroundColor Yellow
-poetry run python -m nuitka @NuitkaArgs $EntryPoint
+uv run python -m nuitka @NuitkaArgs $EntryPoint
 
 if ($LASTEXITCODE -eq 0) {
     Write-Host ""

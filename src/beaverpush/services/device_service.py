@@ -11,6 +11,7 @@
     - :func:`list_windows`        — 通过 Win32 EnumWindows 列出可见顶层窗口
     - :func:`probe_video_info`    — 通过 ffprobe 探测视频分辨率/编码/帧率
     - :func:`check_rtsp_reachable` — 通过 ffprobe 检测 RTSP 地址是否可达
+    - :func:`get_motherboard_uuid` — 获取主板 UUID 作为默认客户端 ID
 
 .. note::
     :func:`list_windows` 仅支持 Windows 平台（依赖 ctypes.windll）。
@@ -328,3 +329,53 @@ def get_screen_refresh_rate(x: int, y: int) -> int:
             if screen.geometry().contains(point):
                 return max(1, round(screen.refreshRate()))
     return 30
+
+
+def get_motherboard_uuid() -> str:
+    """获取主板 UUID 作为默认客户端 ID。
+
+    Windows 下通过 ``wmic csproduct get UUID`` 获取；
+    Linux 下读取 ``/sys/class/dmi/id/product_uuid`` 或
+    ``/etc/machine-id``。
+
+    Returns:
+        UUID 字符串；获取失败时返回空字符串。
+    """
+    import platform
+    import re
+
+    system = platform.system()
+
+    try:
+        if system == "Windows":
+            result = subprocess.run(
+                ["wmic", "csproduct", "get", "UUID"],
+                capture_output=True, text=True, timeout=5,
+                creationflags=CREATE_NO_WINDOW,
+            )
+            for line in result.stdout.strip().splitlines():
+                line = line.strip()
+                if line and line.upper() != "UUID":
+                    # 验证是合法的 UUID 格式
+                    if re.match(
+                        r"^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-"
+                        r"[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+                        line,
+                    ):
+                        return line
+        else:
+            # Linux: 优先尝试 DMI product_uuid（需要 root）
+            from pathlib import Path
+            for path_str in (
+                "/sys/class/dmi/id/product_uuid",
+                "/etc/machine-id",
+            ):
+                try:
+                    content = Path(path_str).read_text().strip()
+                    if content:
+                        return content
+                except (PermissionError, FileNotFoundError):
+                    continue
+    except Exception:
+        pass
+    return ""

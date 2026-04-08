@@ -15,8 +15,8 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Signal, Qt
-from PySide6.QtGui import QFont, QIcon
+from PySide6.QtCore import Signal, Qt, QRegularExpression
+from PySide6.QtGui import QFont, QIcon, QRegularExpressionValidator
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QScrollArea,
@@ -134,9 +134,15 @@ class MainWindow(QMainWindow):
 
         toolbar.addWidget(QLabel("客户端 ID:"))
 
+        # 只允许 ASCII 字母、数字以及 . _ - 三种特殊符号
+        _id_name_validator = QRegularExpressionValidator(
+            QRegularExpression(r"[A-Za-z0-9._\-]*")
+        )
+
         self._client_id_input = QLineEdit()
         self._client_id_input.setPlaceholderText("client01")
         self._client_id_input.setFixedWidth(160)
+        self._client_id_input.setValidator(_id_name_validator)
         self._client_id_input.textChanged.connect(self.client_id_changed.emit)
         toolbar.addWidget(self._client_id_input)
 
@@ -285,6 +291,7 @@ class MainWindow(QMainWindow):
             self.server_reconnect_max_attempts_changed.emit
         )
         bar.addWidget(self._server_reconnect_max_attempts_input)
+        bar.addWidget(QLabel("次"))
         bar.addStretch()
         return bar
 
@@ -344,7 +351,7 @@ class MainWindow(QMainWindow):
 
         self._cards_container = QWidget()
         self._cards_layout = QVBoxLayout(self._cards_container)
-        self._cards_layout.setContentsMargins(0, 0, 6, 0)
+        self._cards_layout.setContentsMargins(0, 0, 0, 0)
         self._cards_layout.setSpacing(10)
         self._cards_layout.addStretch()  # 底部弹簧
 
@@ -427,6 +434,10 @@ class MainWindow(QMainWindow):
         self._client_id_input.blockSignals(True)
         self._client_id_input.setText(cid)
         self._client_id_input.blockSignals(False)
+
+    def set_client_id_placeholder(self, placeholder: str):
+        """设置客户端 ID 输入框的 placeholder 文本。"""
+        self._client_id_input.setPlaceholderText(placeholder)
 
     def add_card(self, card: StreamCardView):
         """向卡片列表添加一张卡片。"""

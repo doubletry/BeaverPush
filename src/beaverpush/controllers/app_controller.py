@@ -25,7 +25,7 @@ from ..models.config import (
     AppConfig, StreamConfig, load_config, save_config, load_stream_config,
 )
 from ..services.device_service import (
-    list_cameras, list_screens, list_windows,
+    list_cameras, list_screens, list_windows, get_motherboard_uuid,
 )
 from ..services.ffmpeg_service import check_rtsp_server_reachable
 from ..services.connectivity_service import ConnectivityCheckWorker
@@ -61,10 +61,16 @@ class AppController(QObject):
         self._tray: QSystemTrayIcon | None = None
         self._test_worker: ConnectivityCheckWorker | None = None
 
+        # 获取主板 UUID 作为默认客户端 ID
+        self._default_client_id = get_motherboard_uuid()
+
         # 同步初始状态到 View
         self._window.set_server(self._rtsp_server)
         self._window.set_server_locked(self._server_locked)
         self._window.set_client_id(self._client_id)
+        # 设置客户端 ID 的 placeholder 为默认值（主板 UUID）
+        if self._default_client_id:
+            self._window.set_client_id_placeholder(self._default_client_id)
         self._window.set_server_reconnect_interval(self._server_reconnect_interval)
         self._window.set_server_reconnect_max_attempts(self._server_reconnect_max_attempts)
 
@@ -163,6 +169,9 @@ class AppController(QObject):
         self._window.show_test_result(ok, message)
         self._window.set_test_button_testing(False)
         self._window.set_status("连接测试完成")
+        # 测试连接通过后自动保存配置
+        if ok:
+            self.save_config()
 
     # ==================================================================
     #  推流通道管理
@@ -196,13 +205,17 @@ class AppController(QObject):
             card=card,
             channel_index=channel_index,
             rtsp_server_getter=lambda: self._rtsp_server,
-            client_id_getter=lambda: self._client_id,
+            client_id_getter=lambda: self._client_id or self._default_client_id,
             server_reconnect_interval_getter=lambda: self._server_reconnect_interval,
             server_reconnect_max_attempts_getter=lambda: self._server_reconnect_max_attempts,
             status_reporter=self._window.set_status,
+            duplicate_name_checker=self._is_duplicate_stream_name,
             parent=self,
         )
         self._controllers.append(ctrl)
+
+        # 设置流名称 placeholder 为下一个可用默认名称
+        self._update_stream_name_placeholders()
 
         # 连接卡片的"移除"按钮、"刷新"按钮和"源类型切换"
         card.remove_clicked.connect(lambda: self._remove_stream(ctrl))
@@ -233,6 +246,44 @@ class AppController(QObject):
         ctrl.deleteLater()
         logger.info("移除推流通道，剩余 {} 路", len(self._controllers))
         self._window.set_status(f"已移除推流通道，剩余 {len(self._controllers)} 路")
+        # 更新未设置流名称的通道的 placeholder
+        self._update_stream_name_placeholders()
+
+    def _update_stream_name_placeholders(self):
+        """为所有未设置流名称的通道更新 placeholder（stream1, stream2, ...）。
+
+        已有自定义名称或已被持久化名称的通道不受影响。
+        """
+        idx = 1
+        for ctrl in self._controllers:
+            default_name = f"stream{idx}"
+            ctrl.card.set_stream_name_placeholder(default_name)
+            ctrl.set_default_stream_name(default_name)
+            idx += 1
+
+    def _get_all_effective_stream_names(self) -> list[str]:
+        """获取所有通道的有效流名称（含默认名称）。"""
+        names = []
+        for ctrl in self._controllers:
+            names.append(ctrl.get_effective_stream_name())
+        return names
+
+    def _is_duplicate_stream_name(self, name: str, channel_index: int) -> bool:
+        """检查指定流名称是否与其他通道重复。
+
+        Args:
+            name: 待检查的流名称。
+            channel_index: 当前通道索引（排除自身）。
+
+        Returns:
+            ``True`` 表示存在重复。
+        """
+        for ctrl in self._controllers:
+            if ctrl.channel_index == channel_index:
+                continue
+            if ctrl.get_effective_stream_name() == name:
+                return True
+        return False
 
     # ==================================================================
     #  设备枚举
