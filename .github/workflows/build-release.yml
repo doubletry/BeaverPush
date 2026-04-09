@@ -97,7 +97,7 @@ jobs:
             exit 1
           }
 
-          Move-Item -Path $installer -Destination $versionedInstaller -Force
+          Move-Item -Path $installer -Destination $versionedInstaller
           echo "INSTALLER_PATH=$versionedInstaller" >> $env:GITHUB_ENV
           echo "INSTALLER_NAME=BeaverPushSetup-v$version.exe" >> $env:GITHUB_ENV
 
