@@ -85,10 +85,26 @@ jobs:
         run: |
           .\build.ps1 -Version "${{ steps.version.outputs.VERSION }}"
 
+      - name: Rename installer with version
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.VERSION }}"
+          $installer = "dist\BeaverPushSetup.exe"
+          $versionedInstaller = "dist\BeaverPushSetup-v$version.exe"
+
+          if (-not (Test-Path $installer)) {
+            Write-Error "Installer not found: $installer"
+            exit 1
+          }
+
+          Move-Item -Path $installer -Destination $versionedInstaller
+          echo "INSTALLER_PATH=$versionedInstaller" >> $env:GITHUB_ENV
+          echo "INSTALLER_NAME=BeaverPushSetup-v$version.exe" >> $env:GITHUB_ENV
+
       - name: Test installer
         shell: pwsh
         run: |
-          $installer = "dist\BeaverPushSetup.exe"
+          $installer = "${{ env.INSTALLER_PATH }}"
           $installDir = "C:\BeaverPush"
 
           Write-Host "=== Running silent install ==="
@@ -134,11 +150,11 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: BeaverPushSetup
-          path: dist/BeaverPushSetup.exe
+          name: ${{ env.INSTALLER_NAME }}
+          path: ${{ env.INSTALLER_PATH }}
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/BeaverPushSetup.exe
+          files: ${{ env.INSTALLER_PATH }}
           generate_release_notes: true
