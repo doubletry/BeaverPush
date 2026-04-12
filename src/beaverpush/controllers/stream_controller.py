@@ -50,7 +50,9 @@ class StreamController(QObject):
         card: StreamCardView,
         channel_index: int,
         rtsp_server_getter: Callable[[], str],
-        client_id_getter: Callable[[], str] | None = None,
+        username_getter: Callable[[], str] | None = None,
+        machine_name_getter: Callable[[], str] | None = None,
+        auth_secret_getter: Callable[[], str] | None = None,
         server_reconnect_interval_getter: Callable[[], int] | None = None,
         server_reconnect_max_attempts_getter: Callable[[], int] | None = None,
         status_reporter: Callable[[str], None] | None = None,
@@ -61,7 +63,9 @@ class StreamController(QObject):
         self._card = card
         self._channel_index = channel_index
         self._rtsp_server_getter = rtsp_server_getter
-        self._client_id_getter = client_id_getter
+        self._username_getter = username_getter or (lambda: "")
+        self._machine_name_getter = machine_name_getter or (lambda: "")
+        self._auth_secret_getter = auth_secret_getter or (lambda: "")
         self._server_reconnect_interval_getter = server_reconnect_interval_getter or (lambda: 5)
         self._server_reconnect_max_attempts_getter = server_reconnect_max_attempts_getter or (lambda: 0)
         self._status_reporter = status_reporter
@@ -211,10 +215,22 @@ class StreamController(QObject):
             self._card.show_error(f"流名称 \"{effective_name}\" 与其他通道重复，请修改")
             return
 
-        client_id = self._client_id_getter() if self._client_id_getter else ""
-        if not client_id:
+        username = self._username_getter()
+        if not username:
             self._set_state(StreamState.IDLE)
-            self._card.show_error("请先配置客户端 ID")
+            self._card.show_error("请先配置用户名")
+            return
+
+        machine_name = self._machine_name_getter()
+        if not machine_name:
+            self._set_state(StreamState.IDLE)
+            self._card.show_error("请先配置设备名")
+            return
+
+        auth_secret = self._auth_secret_getter()
+        if not auth_secret:
+            self._set_state(StreamState.IDLE)
+            self._card.show_error("请先配置授权码")
             return
 
         if self._source_type == "rtsp" and not self._source_path.startswith("rtsp://"):
@@ -237,7 +253,19 @@ class StreamController(QObject):
             self._stream_name = effective_name
             self._card.set_stream_name(effective_name)
 
-        rtsp_url = f"{rtsp_server.rstrip('/')}/{client_id}/{effective_name}"
+        # v2 推流地址：rtsp://username:auth_secret@host:port/username/machine/channel
+        from urllib.parse import urlparse, urlunparse
+        parsed = urlparse(rtsp_server)
+        auth_host = f"{username}:{auth_secret}@{parsed.hostname}"
+        if parsed.port:
+            auth_host += f":{parsed.port}"
+        stream_path = f"/{username}/{machine_name}/{effective_name}"
+        rtsp_url = urlunparse((
+            parsed.scheme or "rtsp",
+            auth_host,
+            stream_path,
+            "", "", "",
+        ))
         self._rtsp_url = rtsp_url
         codec = self._video_codec if self._video_codec != "自动" else ""
 
@@ -337,9 +365,17 @@ class StreamController(QObject):
                 lambda: check_rtsp_reachable(self._source_path),
                 "RTSP 源不可用：",
             ))
+        username = self._username_getter()
+        auth_secret = self._auth_secret_getter()
+        machine_name = self._machine_name_getter()
         tasks.append((
             "正在检查 RTSP 服务器...",
-            lambda: check_rtsp_server_reachable(rtsp_server),
+            lambda: check_rtsp_server_reachable(
+                rtsp_server,
+                username=username,
+                auth_secret=auth_secret,
+                machine_name=machine_name,
+            ),
             "",
         ))
 

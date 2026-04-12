@@ -54,23 +54,27 @@ class AppController(QObject):
         self._config = load_config()
         self._rtsp_server = self._config.rtsp_server
         self._server_locked = self._config.server_locked
-        self._client_id = self._config.client_id
+        self._username = self._config.username
+        self._machine_name = self._config.machine_name
+        self._auth_secret = self._config.auth_secret
         self._server_reconnect_interval = self._config.server_reconnect_interval
         self._server_reconnect_max_attempts = self._config.server_reconnect_max_attempts
         self._controllers: list[StreamController] = []
         self._tray: QSystemTrayIcon | None = None
         self._test_worker: ConnectivityCheckWorker | None = None
 
-        # 获取主板 UUID 作为默认客户端 ID
-        self._default_client_id = get_motherboard_uuid()
+        # 获取主板 UUID 作为默认设备名
+        self._default_machine_name = get_motherboard_uuid()
 
         # 同步初始状态到 View
         self._window.set_server(self._rtsp_server)
         self._window.set_server_locked(self._server_locked)
-        self._window.set_client_id(self._client_id)
-        # 设置客户端 ID 的 placeholder 为默认值（主板 UUID）
-        if self._default_client_id:
-            self._window.set_client_id_placeholder(self._default_client_id)
+        self._window.set_username(self._username)
+        self._window.set_machine_name(self._machine_name)
+        self._window.set_auth_secret(self._auth_secret)
+        # 设置设备名的 placeholder 为默认值（主板 UUID）
+        if self._default_machine_name:
+            self._window.set_machine_name_placeholder(self._default_machine_name)
         self._window.set_server_reconnect_interval(self._server_reconnect_interval)
         self._window.set_server_reconnect_max_attempts(self._server_reconnect_max_attempts)
 
@@ -95,8 +99,10 @@ class AppController(QObject):
         w.test_clicked.connect(self._on_test)
         w.add_stream_clicked.connect(self.add_stream)
         w.save_config_clicked.connect(self.save_config)
-        # 客户端 ID
-        w.client_id_changed.connect(self._on_client_id_changed)
+        # v2 认证字段
+        w.username_changed.connect(self._on_username_changed)
+        w.machine_name_changed.connect(self._on_machine_name_changed)
+        w.auth_secret_changed.connect(self._on_auth_secret_changed)
         # 全部开始/停止
         w.start_all_clicked.connect(self._on_start_all)
         w.stop_all_clicked.connect(self._on_stop_all)
@@ -112,9 +118,17 @@ class AppController(QObject):
         """用户修改 RTSP 服务器地址。"""
         self._rtsp_server = url
 
-    def _on_client_id_changed(self, cid: str):
-        """用户修改客户端 ID。"""
-        self._client_id = cid
+    def _on_username_changed(self, name: str):
+        """用户修改用户名。"""
+        self._username = name
+
+    def _on_machine_name_changed(self, name: str):
+        """用户修改设备名。"""
+        self._machine_name = name
+
+    def _on_auth_secret_changed(self, secret: str):
+        """用户修改授权码。"""
+        self._auth_secret = secret
 
     def _on_server_reconnect_interval_changed(self, value: str):
         self._server_reconnect_interval = self._parse_positive_int(value, 5)
@@ -149,11 +163,27 @@ class AppController(QObject):
         if not self._rtsp_server:
             self._window.show_test_result(False, "请输入 RTSP 服务器地址")
             return
+        if not self._username:
+            self._window.show_test_result(False, "请输入用户名")
+            return
+        if not self._auth_secret:
+            self._window.show_test_result(False, "请输入授权码")
+            return
+
+        effective_machine = self._machine_name or self._default_machine_name
+        if not effective_machine:
+            self._window.show_test_result(False, "请输入设备名（或等待自动检测主板 UUID）")
+            return
 
         self._window.set_test_button_testing(True)
         self._window.set_status("正在测试连接...")
         worker = ConnectivityCheckWorker(
-            [("正在检测 RTSP 服务器...", lambda: check_rtsp_server_reachable(self._rtsp_server), "")],
+            [("正在检测 RTSP 服务器...", lambda: check_rtsp_server_reachable(
+                self._rtsp_server,
+                username=self._username,
+                auth_secret=self._auth_secret,
+                machine_name=effective_machine,
+            ), "")],
             self,
         )
         self._test_worker = worker
@@ -205,7 +235,9 @@ class AppController(QObject):
             card=card,
             channel_index=channel_index,
             rtsp_server_getter=lambda: self._rtsp_server,
-            client_id_getter=lambda: self._client_id or self._default_client_id,
+            username_getter=lambda: self._username,
+            machine_name_getter=lambda: self._machine_name or self._default_machine_name,
+            auth_secret_getter=lambda: self._auth_secret,
             server_reconnect_interval_getter=lambda: self._server_reconnect_interval,
             server_reconnect_max_attempts_getter=lambda: self._server_reconnect_max_attempts,
             status_reporter=self._window.set_status,
@@ -345,7 +377,9 @@ class AppController(QObject):
         cfg = AppConfig(
             rtsp_server=self._rtsp_server,
             server_locked=self._server_locked,
-            client_id=self._client_id,
+            username=self._username,
+            machine_name=self._machine_name,
+            auth_secret=self._auth_secret,
             server_reconnect_interval=self._server_reconnect_interval,
             server_reconnect_max_attempts=self._server_reconnect_max_attempts,
             streams=[],
