@@ -8,7 +8,6 @@ A multi-channel RTSP streaming desktop client built with **PySide6 + MVC archite
 
 - 🎥 **5 video source types:** local video files, cameras, RTSP pull-to-push, screen capture, window capture
 - 📡 **Multi-channel streaming** with independent start/stop control per channel
-- 🔐 **v2 authenticated streaming:** supports window-to-web v2 username + API key authentication, three-level stream path `username/machine/channel`
 - 🎨 **Catppuccin Mocha** dark theme
 - 🔧 **Configurable encoding:** codec (h264/h265/NVENC), resolution, framerate, bitrate
 - 💾 **Auto-persistent configuration** (JSON)
@@ -17,8 +16,8 @@ A multi-channel RTSP streaming desktop client built with **PySide6 + MVC archite
 - 🔒 **Server lock** to prevent accidental RTSP address changes
 - 🔄 **Loop playback** for local video files
 - 🖱️ **Editable channel names** with click-to-edit titles
-- 🔑 **Auto-detect machine name** using motherboard UUID
-- ✅ **Input validation** for username, machine name, and stream names (ASCII-safe characters only)
+- 🔑 **Auto-detect client ID** using motherboard UUID
+- ✅ **Input validation** for client ID and stream names (ASCII-safe characters only)
 - 🔄 **Auto-reconnect** with configurable interval for RTSP sources
 - 💾 **Auto-save on successful connection test**
 
@@ -66,13 +65,10 @@ The build script uses **Nuitka** to compile a standalone executable (`dist/main.
 ## Usage
 
 1. Enter the RTSP server address (e.g. `rtsp://192.168.1.100:8554`)
-2. Enter your **Username** (your account on window-to-web) and **Auth Secret** (API key generated on the window-to-web web UI)
-3. Set a **Machine Name** to identify this streaming device (auto-detected from motherboard UUID if left empty)
-4. Click **Add Channel** to create a streaming channel
-5. Select a video source type and configure parameters
-6. Click **Start** to begin streaming (stream names default to `stream1`, `stream2`, etc. if left empty)
-
-The stream path follows a three-level structure: `{username}/{machine}/{channel}`, e.g. `alice/pc1/stream1`.
+2. Set a Client ID to identify this streaming endpoint (auto-detected from motherboard UUID if left empty)
+3. Click **Add Channel** to create a streaming channel
+4. Select a video source type and configure parameters
+5. Click **Start** to begin streaming (stream names default to `stream1`, `stream2`, etc. if left empty)
 
 ### Video Source Types
 

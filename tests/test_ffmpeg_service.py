@@ -470,25 +470,6 @@ class TestCheckRtspServerReachable:
         assert ok is True
         assert "连接成功" in message
 
-    def test_success_with_auth(self):
-        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
-        with mock.patch(
-            "beaverpush.services.ffmpeg_service.subprocess.run",
-            return_value=completed,
-        ) as mock_run:
-            ok, message = check_rtsp_server_reachable(
-                "rtsp://localhost:8554",
-                username="alice",
-                auth_secret="AKsecret",
-                machine_name="pc1",
-            )
-        assert ok is True
-        # 验证测试 URL 包含认证信息和三级路径
-        call_args = mock_run.call_args[0][0]
-        test_url = call_args[-1]
-        assert "alice:AKsecret@" in test_url
-        assert "/alice/pc1/__connection_test__" in test_url
-
     def test_refused(self):
         completed = subprocess.CompletedProcess(
             args=[],
@@ -503,22 +484,3 @@ class TestCheckRtspServerReachable:
             ok, message = check_rtsp_server_reachable("rtsp://localhost:8554")
         assert ok is False
         assert "连接被拒绝" in message
-
-    def test_unauthorized(self):
-        completed = subprocess.CompletedProcess(
-            args=[],
-            returncode=1,
-            stdout="",
-            stderr="401 Unauthorized",
-        )
-        with mock.patch(
-            "beaverpush.services.ffmpeg_service.subprocess.run",
-            return_value=completed,
-        ):
-            ok, message = check_rtsp_server_reachable(
-                "rtsp://localhost:8554",
-                username="alice",
-                auth_secret="wrong",
-            )
-        assert ok is False
-        assert "认证失败" in message

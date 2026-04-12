@@ -620,33 +620,8 @@ def friendly_error(msg: str) -> str:
     return msg
 
 
-def check_rtsp_server_reachable(
-    rtsp_server: str,
-    timeout: int = 10,
-    username: str = "",
-    auth_secret: str = "",
-    machine_name: str = "",
-) -> tuple[bool, str]:
-    """检测 RTSP 推流服务器是否可达（v2：支持认证 + 三级路径）。"""
-    from urllib.parse import urlparse, urlunparse
-
-    parsed = urlparse(rtsp_server)
-    host_part = parsed.hostname or ""
-    if parsed.port:
-        host_part += f":{parsed.port}"
-
-    # 构建带认证的测试 URL
-    if username and auth_secret:
-        auth_host = f"{username}:{auth_secret}@{host_part}"
-        test_path = f"/{username}/{machine_name or '_test'}/__connection_test__"
-    else:
-        auth_host = host_part
-        test_path = "/__connection_test__"
-
-    test_url = urlunparse((
-        parsed.scheme or "rtsp", auth_host, test_path, "", "", "",
-    ))
-
+def check_rtsp_server_reachable(rtsp_server: str, timeout: int = 10) -> tuple[bool, str]:
+    """检测 RTSP 推流服务器是否可达。"""
     try:
         result = subprocess.run(
             [
@@ -655,7 +630,7 @@ def check_rtsp_server_reachable(
                 "-c:v", "libx264", "-preset", "ultrafast",
                 "-t", "1",
                 "-f", "rtsp", "-rtsp_transport", "tcp",
-                test_url,
+                f"{rtsp_server.rstrip('/')}/__connection_test__",
             ],
             capture_output=True,
             text=True,
@@ -665,8 +640,6 @@ def check_rtsp_server_reachable(
         stderr = result.stderr.lower()
         if result.returncode == 0:
             return True, "连接成功！RTSP 服务器可达。"
-        if "401" in stderr or "unauthorized" in stderr:
-            return False, "认证失败，请检查用户名和授权码。"
         if "connection refused" in stderr:
             return False, "连接被拒绝，请检查服务器是否启动。"
         if "no route" in stderr or "unreachable" in stderr:
