@@ -71,13 +71,17 @@ class AppConfig:
     Attributes:
         rtsp_server:     RTSP 服务器地址（如 ``"rtsp://192.168.1.100:8554"``）
         server_locked:   RTSP 服务器地址是否锁定
-        client_id:       客户端 ID，所有通道共享
+        username:        推流用户名（window-to-web 账户名，推流路径第一级）
+        machine_name:    设备名（推流路径第二级，留空时使用主板 UUID）
+        auth_secret:     认证授权码（密码或 API Key，会按当前设计明文保存在本地 config.json）
         streams:         推流通道配置列表，每个元素为 :class:`StreamConfig` 的字典形式
     """
 
     rtsp_server: str = ""
     server_locked: bool = False
-    client_id: str = ""
+    username: str = ""
+    machine_name: str = ""
+    auth_secret: str = ""
     server_reconnect_interval: int = 5
     server_reconnect_max_attempts: int = 0
     streams: list[dict] = field(default_factory=list)
@@ -107,7 +111,12 @@ def load_config() -> AppConfig:
             return AppConfig(
                 rtsp_server=data.get("rtsp_server", ""),
                 server_locked=data.get("server_locked", False),
-                client_id=data.get("client_id", ""),
+                username=data.get("username", ""),
+                machine_name=data.get(
+                    "machine_name",
+                    data.get("client_id", ""),  # 兼容旧配置：client_id → machine_name
+                ),
+                auth_secret=data.get("auth_secret", ""),
                 server_reconnect_interval=int(data.get("server_reconnect_interval", 5) or 5),
                 server_reconnect_max_attempts=int(
                     data.get(
@@ -124,7 +133,10 @@ def load_config() -> AppConfig:
 
 
 def save_config(cfg: AppConfig):
-    """保存配置到文件"""
+    """保存配置到文件。
+
+    注意：``auth_secret`` 会按当前设计以明文写入本地 ``config.json``。
+    """
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     CONFIG_FILE.write_text(
         json.dumps(asdict(cfg), ensure_ascii=False, indent=2),

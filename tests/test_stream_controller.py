@@ -89,15 +89,17 @@ def _make_mock_card():
 
 
 class TestStreamControllerUrlConstruction:
-    """验证推流 URL 使用 client_id/stream_name 格式"""
+    """验证推流 URL 使用 v2 三级路径格式 + 认证"""
 
-    def test_url_format_with_client_id(self):
+    def test_url_format_v2_with_auth(self):
         card = _make_mock_card()
         ctrl = StreamController(
             card=card,
             channel_index=0,
             rtsp_server_getter=lambda: "rtsp://localhost:8554",
-            client_id_getter=lambda: "client01",
+            username_getter=lambda: "alice",
+            machine_name_getter=lambda: "pc1",
+            auth_secret_getter=lambda: "AKsecret123",
         )
         # 设置内部状态
         ctrl._source_type = "video"
@@ -112,28 +114,127 @@ class TestStreamControllerUrlConstruction:
         ), mock.patch(
             "beaverpush.controllers.stream_controller.probe_video_info",
             return_value={},
-        ):
+        ), mock.patch(
+            "beaverpush.controllers.stream_controller.logger.info"
+        ) as mock_logger:
             mock_build.return_value = ["ffmpeg", "-i", "test"]
             ctrl.start_stream()
             # 验证 build_ffmpeg_command 被调用时的 rtsp_url 参数
             mock_build.assert_called_once()
             _, kwargs = mock_build.call_args
-            assert kwargs["rtsp_url"] == "rtsp://localhost:8554/client01/stream1"
+            assert kwargs["rtsp_url"] == "rtsp://alice:AKsecret123@localhost:8554/alice/pc1/stream1"
+            assert ctrl._rtsp_url == "rtsp://alice:***@localhost:8554/alice/pc1/stream1"
+            assert ctrl._preview_rtsp_url == "rtsp://alice:AKsecret123@localhost:8554/alice/pc1/stream1"
+            logged_url = mock_logger.call_args.args[2]
+            assert "AKsecret123" not in logged_url
+            assert logged_url == "rtsp://alice:***@localhost:8554/alice/pc1/stream1"
 
-    def test_missing_client_id_shows_error(self):
+    def test_url_format_v2_normalizes_server_and_encodes_auth(self):
+        card = _make_mock_card()
+        ctrl = StreamController(
+            card=card,
+            channel_index=0,
+            rtsp_server_getter=lambda: "localhost:8554",
+            username_getter=lambda: "alice",
+            machine_name_getter=lambda: "pc1",
+            auth_secret_getter=lambda: "A@B:C/%",
+        )
+        ctrl._source_type = "video"
+        ctrl._source_path = __file__
+        ctrl._stream_name = "stream1"
+        ctrl._video_codec = "libx264"
+
+        with mock.patch(
+            "beaverpush.controllers.stream_controller.build_ffmpeg_command"
+        ) as mock_build, mock.patch(
+            "beaverpush.controllers.stream_controller.FFmpegWorker"
+        ), mock.patch(
+            "beaverpush.controllers.stream_controller.probe_video_info",
+            return_value={},
+        ), mock.patch(
+            "beaverpush.controllers.stream_controller.logger.info"
+        ) as mock_logger:
+            mock_build.return_value = ["ffmpeg", "-i", "test"]
+            ctrl.start_stream()
+
+            _, kwargs = mock_build.call_args
+            assert kwargs["rtsp_url"] == "rtsp://alice:A%40B%3AC%2F%25@localhost:8554/alice/pc1/stream1"
+            assert ctrl._rtsp_url == "rtsp://alice:***@localhost:8554/alice/pc1/stream1"
+            assert ctrl._preview_rtsp_url == "rtsp://alice:A%40B%3AC%2F%25@localhost:8554/alice/pc1/stream1"
+            logged_url = mock_logger.call_args.args[2]
+            assert "A@B:C/%" not in logged_url
+            assert logged_url == "rtsp://alice:***@localhost:8554/alice/pc1/stream1"
+
+    def test_invalid_server_format_shows_error(self):
+        card = _make_mock_card()
+        ctrl = StreamController(
+            card=card,
+            channel_index=0,
+            rtsp_server_getter=lambda: "http://localhost:8554",
+            username_getter=lambda: "alice",
+            machine_name_getter=lambda: "pc1",
+            auth_secret_getter=lambda: "secret",
+        )
+        ctrl._source_type = "video"
+        ctrl._source_path = __file__
+        ctrl._stream_name = "stream1"
+
+        ctrl.start_stream()
+        card.show_error.assert_called_with("RTSP 服务器地址格式不正确，应为 rtsp://host[:port]")
+        assert ctrl._state == StreamState.IDLE
+        assert ctrl._worker is None
+        assert ctrl._preview_rtsp_url == ""
+
+    def test_missing_username_shows_error(self):
         card = _make_mock_card()
         ctrl = StreamController(
             card=card,
             channel_index=0,
             rtsp_server_getter=lambda: "rtsp://localhost:8554",
-            client_id_getter=lambda: "",
+            username_getter=lambda: "",
+            machine_name_getter=lambda: "pc1",
+            auth_secret_getter=lambda: "secret",
         )
         ctrl._source_type = "video"
         ctrl._source_path = "/test.mp4"
         ctrl._stream_name = "stream1"
 
         ctrl.start_stream()
-        card.show_error.assert_called_with("请先配置客户端 ID")
+        card.show_error.assert_called_with("请先配置用户名")
+
+    def test_missing_machine_name_shows_error(self):
+        card = _make_mock_card()
+        ctrl = StreamController(
+            card=card,
+            channel_index=0,
+            rtsp_server_getter=lambda: "rtsp://localhost:8554",
+            username_getter=lambda: "alice",
+            machine_name_getter=lambda: "",
+            auth_secret_getter=lambda: "secret",
+        )
+        ctrl._source_type = "video"
+        ctrl._source_path = "/test.mp4"
+        ctrl._stream_name = "stream1"
+
+        ctrl.start_stream()
+        card.show_error.assert_called_with("请先配置设备名")
+
+    def test_missing_auth_secret_shows_error(self):
+        card = _make_mock_card()
+        ctrl = StreamController(
+            card=card,
+            channel_index=0,
+            rtsp_server_getter=lambda: "rtsp://localhost:8554",
+            username_getter=lambda: "alice",
+            machine_name_getter=lambda: "pc1",
+            auth_secret_getter=lambda: "",
+        )
+        ctrl._source_type = "video"
+        ctrl._source_path = "/test.mp4"
+        ctrl._stream_name = "stream1"
+
+        ctrl.start_stream()
+        card.show_error.assert_called_with("请先配置授权码")
 
     def test_missing_server_shows_error(self):
         card = _make_mock_card()
@@ -141,7 +242,7 @@ class TestStreamControllerUrlConstruction:
             card=card,
             channel_index=0,
             rtsp_server_getter=lambda: "",
-            client_id_getter=lambda: "client01",
+            username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "AKsecret123",
         )
         ctrl._source_type = "video"
         ctrl._source_path = "/test.mp4"
@@ -156,7 +257,7 @@ class TestStreamControllerUrlConstruction:
             card=card,
             channel_index=0,
             rtsp_server_getter=lambda: "rtsp://localhost:8554",
-            client_id_getter=lambda: "client01",
+            username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "AKsecret123",
         )
         ctrl._source_type = "video"
         ctrl._source_path = "/test.mp4"
@@ -175,7 +276,7 @@ class TestStreamControllerSourceDefaults:
             card=card,
             channel_index=0,
             rtsp_server_getter=lambda: "rtsp://localhost:8554",
-            client_id_getter=lambda: "c1",
+            username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
         )
         ctrl._source_type = "screen"
         ctrl._source_path = "offset:0,0,1920,1080"
@@ -206,7 +307,7 @@ class TestStreamControllerSourceDefaults:
             card=card,
             channel_index=0,
             rtsp_server_getter=lambda: "rtsp://localhost:8554",
-            client_id_getter=lambda: "c1",
+            username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
         )
         ctrl._source_type = "video"
         ctrl._source_path = __file__
@@ -237,7 +338,7 @@ class TestStreamControllerSourceDefaults:
             card=card,
             channel_index=0,
             rtsp_server_getter=lambda: "rtsp://localhost:8554",
-            client_id_getter=lambda: "c1",
+            username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
         )
         ctrl._source_type = "rtsp"
         ctrl._source_path = "rtsp://source:554/live"
@@ -261,7 +362,7 @@ class TestStreamControllerSourceDefaults:
             card=card,
             channel_index=0,
             rtsp_server_getter=lambda: "rtsp://localhost:8554",
-            client_id_getter=lambda: "c1",
+            username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
         )
         ctrl._source_type = "camera"
         ctrl._source_path = "USB Camera"
@@ -286,7 +387,7 @@ class TestStreamControllerSourceDefaults:
             card=card,
             channel_index=0,
             rtsp_server_getter=lambda: "rtsp://localhost:8554",
-            client_id_getter=lambda: "c1",
+            username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
         )
         ctrl._source_type = "screen"
         ctrl._source_path = "offset:0,0,1920,1080"
@@ -323,7 +424,7 @@ class TestStreamControllerConfig:
             card=card,
             channel_index=0,
             rtsp_server_getter=lambda: "rtsp://localhost:8554",
-            client_id_getter=lambda: "c1",
+            username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
         )
         ctrl._source_type = "video"
         ctrl._source_path = "/test.mp4"
@@ -344,7 +445,7 @@ class TestStreamControllerConfig:
             card=card,
             channel_index=0,
             rtsp_server_getter=lambda: "rtsp://localhost:8554",
-            client_id_getter=lambda: "c1",
+            username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
         )
         ctrl._video_codec = "自动"
         cfg = ctrl.to_config()
@@ -356,7 +457,7 @@ class TestStreamControllerConfig:
             card=card,
             channel_index=0,
             rtsp_server_getter=lambda: "rtsp://localhost:8554",
-            client_id_getter=lambda: "c1",
+            username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
         )
         ctrl._source_reconnect_interval = 9
         ctrl._source_reconnect_max_attempts = 0
@@ -371,7 +472,7 @@ class TestStreamControllerConfig:
             card=card,
             channel_index=0,
             rtsp_server_getter=lambda: "rtsp://localhost:8554",
-            client_id_getter=lambda: "c1",
+            username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
         )
         cfg = StreamConfig(
             name="restored",
@@ -396,7 +497,7 @@ class TestStreamControllerConfig:
             card=card,
             channel_index=0,
             rtsp_server_getter=lambda: "rtsp://localhost:8554",
-            client_id_getter=lambda: "c1",
+            username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
         )
         cfg = StreamConfig(
             name="restored",
@@ -421,7 +522,7 @@ class TestStreamControllerState:
             card=card,
             channel_index=0,
             rtsp_server_getter=lambda: "",
-            client_id_getter=lambda: "",
+            username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
         )
         assert ctrl._state == StreamState.IDLE
         assert ctrl._bitrate == ""
@@ -435,7 +536,7 @@ class TestStreamControllerState:
             card=card,
             channel_index=0,
             rtsp_server_getter=lambda: "",
-            client_id_getter=lambda: "",
+            username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
         )
         assert ctrl._source_type == "video"
 
@@ -444,7 +545,7 @@ class TestStreamControllerState:
         card = _make_mock_card()
         ctrl = StreamController(
             card=card, channel_index=0,
-            rtsp_server_getter=lambda: "", client_id_getter=lambda: "c1",
+            rtsp_server_getter=lambda: "", username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
         )
         cfg = StreamConfig(name="s1", video_codec="libx264", width="1920")
         ctrl.from_config(cfg)
@@ -455,7 +556,7 @@ class TestStreamControllerState:
         card = _make_mock_card()
         ctrl = StreamController(
             card=card, channel_index=0,
-            rtsp_server_getter=lambda: "", client_id_getter=lambda: "c1",
+            rtsp_server_getter=lambda: "", username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
         )
         cfg = StreamConfig(name="s1", source_type="video")
         ctrl.from_config(cfg)
@@ -467,7 +568,7 @@ class TestStreamControllerState:
             card=card,
             channel_index=5,
             rtsp_server_getter=lambda: "",
-            client_id_getter=lambda: "",
+            username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
         )
         assert ctrl.channel_index == 5
 
@@ -479,7 +580,7 @@ class TestProgressSuppression:
         card = _make_mock_card()
         ctrl = StreamController(
             card=card, channel_index=0,
-            rtsp_server_getter=lambda: "", client_id_getter=lambda: "",
+            rtsp_server_getter=lambda: "", username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
         )
         ctrl._source_type = "video"
         ctrl._on_worker_progress({"time": "00:01:00", "fps": "30", "speed": "1x"})
@@ -490,7 +591,7 @@ class TestProgressSuppression:
         card = _make_mock_card()
         ctrl = StreamController(
             card=card, channel_index=0,
-            rtsp_server_getter=lambda: "", client_id_getter=lambda: "",
+            rtsp_server_getter=lambda: "", username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
         )
         ctrl._source_type = "screen"
         ctrl._on_worker_progress({"time": "00:01:00", "fps": "30"})
@@ -504,7 +605,7 @@ class TestReconnectBehavior:
             card=card,
             channel_index=0,
             rtsp_server_getter=lambda: "rtsp://localhost:8554",
-            client_id_getter=lambda: "c1",
+            username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
         )
         ctrl._source_type = "rtsp"
         ctrl._source_path = "rtsp://source/live"
@@ -529,7 +630,7 @@ class TestReconnectBehavior:
             card=card,
             channel_index=0,
             rtsp_server_getter=lambda: "rtsp://localhost:8554",
-            client_id_getter=lambda: "c1",
+            username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
         )
         ctrl._source_type = "rtsp"
         ctrl._source_path = "rtsp://source/live"
@@ -546,7 +647,7 @@ class TestReconnectBehavior:
             card=card,
             channel_index=0,
             rtsp_server_getter=lambda: "rtsp://localhost:8554",
-            client_id_getter=lambda: "c1",
+            username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
         )
         ctrl._source_type = "video"
         ctrl._source_path = __file__
@@ -563,7 +664,7 @@ class TestReconnectBehavior:
             card=card,
             channel_index=0,
             rtsp_server_getter=lambda: "rtsp://localhost:8554",
-            client_id_getter=lambda: "c1",
+            username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
         )
         ctrl._source_type = "camera"
         ctrl._source_reconnect_interval = 7
@@ -581,7 +682,7 @@ class TestReconnectBehavior:
             card=card,
             channel_index=0,
             rtsp_server_getter=lambda: "rtsp://localhost:8554",
-            client_id_getter=lambda: "c1",
+            username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
         )
         ctrl._source_type = "camera"
         ctrl._source_reconnect_max_attempts = 1
@@ -598,7 +699,7 @@ class TestReconnectBehavior:
             card=card,
             channel_index=0,
             rtsp_server_getter=lambda: "rtsp://localhost:8554",
-            client_id_getter=lambda: "c1",
+            username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
             server_reconnect_interval_getter=lambda: 9,
             server_reconnect_max_attempts_getter=lambda: 2,
         )
@@ -617,7 +718,7 @@ class TestReconnectBehavior:
             card=card,
             channel_index=0,
             rtsp_server_getter=lambda: "rtsp://localhost:8554",
-            client_id_getter=lambda: "c1",
+            username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
             status_reporter=status_reporter,
         )
         ctrl._source_type = "rtsp"
@@ -636,7 +737,7 @@ class TestReconnectBehavior:
             card=card,
             channel_index=0,
             rtsp_server_getter=lambda: "rtsp://localhost:8554",
-            client_id_getter=lambda: "c1",
+            username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
         )
         ctrl._source_type = "camera"
         ctrl._source_reconnect_interval = 7
@@ -666,7 +767,7 @@ class TestReconnectBehavior:
             card=card,
             channel_index=0,
             rtsp_server_getter=lambda: "rtsp://localhost:8554",
-            client_id_getter=lambda: "c1",
+            username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
         )
         worker = mock.MagicMock()
         ctrl._preflight_worker = worker
@@ -684,7 +785,7 @@ class TestReconnectBehavior:
             card=card,
             channel_index=0,
             rtsp_server_getter=lambda: "rtsp://localhost:8554",
-            client_id_getter=lambda: "c1",
+            username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
         )
         ctrl._source_type = "video"
         ctrl._source_path = __file__
@@ -713,7 +814,7 @@ class TestReconnectBehavior:
             card=card,
             channel_index=0,
             rtsp_server_getter=lambda: "rtsp://localhost:8554",
-            client_id_getter=lambda: "c1",
+            username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
         )
         worker = mock.MagicMock()
         ctrl._preflight_worker = worker
@@ -734,7 +835,7 @@ class TestPreviewToggle:
         ctrl = StreamController(
             card=card, channel_index=0,
             rtsp_server_getter=lambda: "rtsp://localhost:8554",
-            client_id_getter=lambda: "c1",
+            username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
         )
         ctrl.toggle_preview()
         # 不在推流中，不应有任何变化
@@ -745,12 +846,12 @@ class TestPreviewToggle:
         ctrl = StreamController(
             card=card, channel_index=0,
             rtsp_server_getter=lambda: "rtsp://localhost:8554",
-            client_id_getter=lambda: "c1",
+            username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
         )
         worker = mock.MagicMock()
         ctrl._worker = worker
         ctrl._state = StreamState.STREAMING
-        ctrl._rtsp_url = "rtsp://localhost:8554/c1/s1"
+        ctrl._preview_rtsp_url = "rtsp://localhost:8554/c1/s1"
         ctrl._preview = False
 
         ctrl.toggle_preview()
@@ -763,7 +864,7 @@ class TestPreviewToggle:
         ctrl = StreamController(
             card=card, channel_index=0,
             rtsp_server_getter=lambda: "rtsp://localhost:8554",
-            client_id_getter=lambda: "c1",
+            username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
         )
         worker = mock.MagicMock()
         ctrl._worker = worker
@@ -780,7 +881,7 @@ class TestPreviewToggle:
         ctrl = StreamController(
             card=card, channel_index=0,
             rtsp_server_getter=lambda: "rtsp://localhost:8554",
-            client_id_getter=lambda: "c1",
+            username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
         )
         ctrl._preview = True
         ctrl._on_worker_stopped()
@@ -792,7 +893,7 @@ class TestPreviewToggle:
         ctrl = StreamController(
             card=card, channel_index=0,
             rtsp_server_getter=lambda: "rtsp://localhost:8554",
-            client_id_getter=lambda: "c1",
+            username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
         )
         ctrl._source_type = "video"
         ctrl._source_path = __file__
@@ -809,14 +910,15 @@ class TestPreviewToggle:
         ):
             mock_build.return_value = ["ffmpeg", "-i", "test"]
             ctrl.start_stream()
-            assert ctrl._rtsp_url == "rtsp://localhost:8554/c1/s1"
+            assert ctrl._rtsp_url == "rtsp://alice:***@localhost:8554/alice/pc1/s1"
+            assert ctrl._preview_rtsp_url == "rtsp://alice:secret@localhost:8554/alice/pc1/s1"
 
     def test_to_config_preview_always_false(self):
         card = _make_mock_card()
         ctrl = StreamController(
             card=card, channel_index=0,
             rtsp_server_getter=lambda: "",
-            client_id_getter=lambda: "",
+            username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
         )
         ctrl._preview = True  # 运行时preview开启
         cfg = ctrl.to_config()
@@ -828,7 +930,7 @@ class TestPreviewToggle:
         ctrl = StreamController(
             card=card, channel_index=0,
             rtsp_server_getter=lambda: "rtsp://localhost:8554",
-            client_id_getter=lambda: "c1",
+            username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
         )
         ctrl._preview = True
         ctrl._on_preview_closed()
@@ -844,7 +946,7 @@ class TestDefaultStreamName:
         ctrl = StreamController(
             card=card, channel_index=0,
             rtsp_server_getter=lambda: "rtsp://localhost:8554",
-            client_id_getter=lambda: "c1",
+            username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
         )
         ctrl.set_default_stream_name("stream1")
         assert ctrl.get_effective_stream_name() == "stream1"
@@ -854,7 +956,7 @@ class TestDefaultStreamName:
         ctrl = StreamController(
             card=card, channel_index=0,
             rtsp_server_getter=lambda: "rtsp://localhost:8554",
-            client_id_getter=lambda: "c1",
+            username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
         )
         ctrl.set_default_stream_name("stream1")
         ctrl._stream_name = "my_stream"
@@ -865,7 +967,7 @@ class TestDefaultStreamName:
         ctrl = StreamController(
             card=card, channel_index=0,
             rtsp_server_getter=lambda: "rtsp://localhost:8554",
-            client_id_getter=lambda: "c1",
+            username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
         )
         assert ctrl.get_effective_stream_name() == ""
 
@@ -875,7 +977,7 @@ class TestDefaultStreamName:
         ctrl = StreamController(
             card=card, channel_index=0,
             rtsp_server_getter=lambda: "rtsp://localhost:8554",
-            client_id_getter=lambda: "c1",
+            username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
         )
         ctrl._source_type = "video"
         ctrl._source_path = __file__
@@ -903,7 +1005,7 @@ class TestDefaultStreamName:
         ctrl = StreamController(
             card=card, channel_index=0,
             rtsp_server_getter=lambda: "",
-            client_id_getter=lambda: "",
+            username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
         )
         ctrl._stream_name = ""
         ctrl._default_stream_name = "stream2"
@@ -919,7 +1021,7 @@ class TestDuplicateStreamNameCheck:
         ctrl = StreamController(
             card=card, channel_index=0,
             rtsp_server_getter=lambda: "rtsp://localhost:8554",
-            client_id_getter=lambda: "c1",
+            username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
             duplicate_name_checker=lambda name, idx: name == "stream1",
         )
         ctrl._source_type = "video"
@@ -935,7 +1037,7 @@ class TestDuplicateStreamNameCheck:
         ctrl = StreamController(
             card=card, channel_index=0,
             rtsp_server_getter=lambda: "rtsp://localhost:8554",
-            client_id_getter=lambda: "c1",
+            username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
             duplicate_name_checker=lambda name, idx: False,
         )
         ctrl._source_type = "video"
@@ -964,7 +1066,7 @@ class TestSourcePathsCache:
         ctrl = StreamController(
             card=card, channel_index=0,
             rtsp_server_getter=lambda: "",
-            client_id_getter=lambda: "",
+            username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
         )
         ctrl._source_type = "video"
         ctrl._source_path = "/path/to/video.mp4"
@@ -984,7 +1086,7 @@ class TestSourcePathsCache:
         ctrl = StreamController(
             card=card, channel_index=0,
             rtsp_server_getter=lambda: "",
-            client_id_getter=lambda: "",
+            username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
         )
         ctrl._source_type = "rtsp"
         ctrl._on_source_path("rtsp://192.168.1.1/live")
@@ -995,7 +1097,7 @@ class TestSourcePathsCache:
         ctrl = StreamController(
             card=card, channel_index=0,
             rtsp_server_getter=lambda: "",
-            client_id_getter=lambda: "",
+            username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
         )
         ctrl._source_type = "camera"
         ctrl._on_device_selected("device:cam0")

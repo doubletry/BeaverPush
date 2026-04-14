@@ -33,6 +33,7 @@ import subprocess
 import re
 import threading
 import time
+from urllib.parse import quote, urlparse, urlunparse
 
 from PySide6.QtCore import QThread, Signal
 
@@ -55,6 +56,56 @@ READY_LINE_KEYWORDS = (
 def _make_even(v: int) -> int:
     """将值调整为最近的偶数（FFmpeg 要求宽高为偶数）。"""
     return v if v % 2 == 0 else v + 1
+
+
+def normalize_rtsp_server(rtsp_server: str) -> str:
+    """规范化 RTSP 服务器地址并校验基本格式。"""
+    normalized = rtsp_server.strip()
+    if "://" not in normalized:
+        normalized = f"rtsp://{normalized}"
+
+    parsed = urlparse(normalized)
+    if (
+        parsed.scheme != "rtsp"
+        or not parsed.hostname
+        # v2 所有权模型会自行拼接 /{username}/{machine}/{channel}，因此这里不接受额外基础路径。
+        or parsed.path not in ("", "/")
+        or parsed.params
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError("RTSP 服务器地址格式不正确，应为 rtsp://host[:port]")
+    return normalized
+
+
+def _format_rtsp_netloc(hostname: str, port: int | None) -> str:
+    """格式化 RTSP URL 的 netloc，并为 IPv6 主机补上方括号。"""
+    host = f"[{hostname}]" if ":" in hostname else hostname
+    return f"{host}:{port}" if port else host
+
+
+def build_authenticated_rtsp_url(
+    rtsp_server: str,
+    path_segments: list[str],
+    username: str = "",
+    auth_secret: str = "",
+    *,
+    mask_auth_secret: bool = False,
+) -> str:
+    """构建带认证信息的 RTSP URL。"""
+    parsed = urlparse(normalize_rtsp_server(rtsp_server))
+    netloc = _format_rtsp_netloc(parsed.hostname or "", parsed.port)
+    if username and auth_secret:
+        encoded_username = quote(username, safe="")
+        encoded_secret = "***" if mask_auth_secret else quote(auth_secret, safe="")
+        netloc = f"{encoded_username}:{encoded_secret}@{netloc}"
+
+    # 第一级用户名仅保留 _ -；后续设备名/流名称保留 . _ -，与当前 UI/帮助文档规则一致。
+    path = "/" + "/".join(
+        quote(segment, safe="_-" if index == 0 else "._-")
+        for index, segment in enumerate(path_segments)
+    )
+    return urlunparse((parsed.scheme, netloc, path, "", "", ""))
 
 
 class FFmpegWorker(QThread):
@@ -620,8 +671,30 @@ def friendly_error(msg: str) -> str:
     return msg
 
 
-def check_rtsp_server_reachable(rtsp_server: str, timeout: int = 10) -> tuple[bool, str]:
-    """检测 RTSP 推流服务器是否可达。"""
+def check_rtsp_server_reachable(
+    rtsp_server: str,
+    timeout: int = 10,
+    username: str = "",
+    auth_secret: str = "",
+    machine_name: str = "",
+) -> tuple[bool, str]:
+    """检测 RTSP 推流服务器是否可达（v2：支持认证 + 三级路径）。"""
+    try:
+        if username and auth_secret:
+            test_url = build_authenticated_rtsp_url(
+                rtsp_server,
+                [username, machine_name or "_test", "__connection_test__"],
+                username=username,
+                auth_secret=auth_secret,
+            )
+        else:
+            test_url = build_authenticated_rtsp_url(
+                rtsp_server,
+                ["__connection_test__"],
+            )
+    except ValueError as exc:
+        return False, str(exc)
+
     try:
         result = subprocess.run(
             [
@@ -630,7 +703,7 @@ def check_rtsp_server_reachable(rtsp_server: str, timeout: int = 10) -> tuple[bo
                 "-c:v", "libx264", "-preset", "ultrafast",
                 "-t", "1",
                 "-f", "rtsp", "-rtsp_transport", "tcp",
-                f"{rtsp_server.rstrip('/')}/__connection_test__",
+                test_url,
             ],
             capture_output=True,
             text=True,
@@ -640,6 +713,8 @@ def check_rtsp_server_reachable(rtsp_server: str, timeout: int = 10) -> tuple[bo
         stderr = result.stderr.lower()
         if result.returncode == 0:
             return True, "连接成功！RTSP 服务器可达。"
+        if "401" in stderr or "unauthorized" in stderr:
+            return False, "认证失败，请检查用户名和授权码。"
         if "connection refused" in stderr:
             return False, "连接被拒绝，请检查服务器是否启动。"
         if "no route" in stderr or "unreachable" in stderr:

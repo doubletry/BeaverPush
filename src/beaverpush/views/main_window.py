@@ -20,7 +20,7 @@ from PySide6.QtGui import QFont, QIcon, QRegularExpressionValidator
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QScrollArea,
-    QMessageBox, QFrame, QDialog, QTextBrowser,
+    QMessageBox, QFrame, QDialog, QTextBrowser, QSizePolicy,
 )
 
 from .stream_card import StreamCardView
@@ -47,8 +47,10 @@ class MainWindow(QMainWindow):
     server_changed     = Signal(str)
     server_reconnect_interval_changed = Signal(str)
     server_reconnect_max_attempts_changed = Signal(str)
-    # 客户端 ID 变更信号
-    client_id_changed  = Signal(str)
+    # v2 认证字段变更信号
+    username_changed   = Signal(str)
+    machine_name_changed = Signal(str)
+    auth_secret_changed = Signal(str)
     # 全部开始/停止推流信号
     start_all_clicked  = Signal()
     stop_all_clicked   = Signal()
@@ -112,16 +114,18 @@ class MainWindow(QMainWindow):
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
 
-        # ── 第 1 行：RTSP 服务器 + 客户端 ID + 锁定 ──
+        # ── 第 1 行：RTSP 服务器 + 锁定 ──
         layout.addLayout(self._build_toolbar())
+        # ── 第 2 行：账号 + 客户端 ID + 授权码 ──
+        layout.addWidget(self._build_auth_bar())
         layout.addLayout(self._build_reconnect_bar())
-        # ── 第 2 行：功能按钮 ──
+        # ── 第 3 行：功能按钮 ──
         layout.addLayout(self._build_action_bar())
 
         return card
 
     def _build_toolbar(self) -> QHBoxLayout:
-        """构建顶部工具栏：RTSP 服务器 + 客户端 ID + 锁定按钮。"""
+        """构建顶部工具栏：RTSP 服务器 + 锁定按钮。"""
         toolbar = QHBoxLayout()
         toolbar.setSpacing(10)
 
@@ -132,21 +136,7 @@ class MainWindow(QMainWindow):
         self._server_input.textChanged.connect(self.server_changed.emit)
         toolbar.addWidget(self._server_input, 1)
 
-        toolbar.addWidget(QLabel("客户端 ID:"))
-
-        # 只允许 ASCII 字母、数字以及 . _ - 三种特殊符号
-        _id_name_validator = QRegularExpressionValidator(
-            QRegularExpression(r"[A-Za-z0-9._\-]*")
-        )
-
-        self._client_id_input = QLineEdit()
-        self._client_id_input.setPlaceholderText("client01")
-        self._client_id_input.setFixedWidth(160)
-        self._client_id_input.setValidator(_id_name_validator)
-        self._client_id_input.textChanged.connect(self.client_id_changed.emit)
-        toolbar.addWidget(self._client_id_input)
-
-        # 锁定/解锁 RTSP 地址和客户端 ID
+        # 锁定/解锁所有全局配置
         self._lock_btn = QPushButton("🔓")
         self._lock_btn.setFixedWidth(36)
         self._lock_btn.setStyleSheet(f"""
@@ -157,11 +147,126 @@ class MainWindow(QMainWindow):
             }}
             QPushButton:hover {{ background-color: {Theme.SURFACE2}; }}
         """)
-        self._lock_btn.setToolTip("锁定 RTSP 地址和客户端 ID，防止误修改")
+        self._lock_btn.setToolTip("锁定全局配置，防止误修改")
         self._lock_btn.clicked.connect(self._toggle_server_lock)
         toolbar.addWidget(self._lock_btn)
 
         return toolbar
+
+    def _build_auth_bar(self) -> QFrame:
+        """构建认证参数区域：账号 + 客户端 ID + 授权码。"""
+        container = QFrame()
+        container.setObjectName("authBar")
+        container.setStyleSheet(f"""
+            QFrame#authFieldGroup {{
+                background-color: {Theme.CRUST};
+                border: 1px solid {Theme.SURFACE0};
+                border-radius: {Theme.RADIUS_NORMAL}px;
+            }}
+            QLabel#authFieldTitle {{
+                color: {Theme.SUBTEXT1};
+                font-weight: bold;
+            }}
+            QLabel#authFieldHint {{
+                color: {Theme.OVERLAY1};
+            }}
+        """)
+        bar = QHBoxLayout(container)
+        bar.setContentsMargins(0, 0, 0, 0)
+        bar.setSpacing(12)
+
+        # 只允许 ASCII 字母、数字以及 _ - 符号（v2 用户名规则）
+        _name_validator = QRegularExpressionValidator(
+            QRegularExpression(r"[A-Za-z0-9_\-]*")
+        )
+        # 设备名额外允许 .
+        _machine_validator = QRegularExpressionValidator(
+            QRegularExpression(r"[A-Za-z0-9._\-]*")
+        )
+
+        self._username_input = QLineEdit()
+        self._username_input.setPlaceholderText("your_username")
+        self._username_input.setMinimumWidth(180)
+        self._username_input.setValidator(_name_validator)
+        self._username_input.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
+        self._username_input.textChanged.connect(self.username_changed.emit)
+        bar.addWidget(
+            self._build_auth_field_group(
+                "账号（用户名）",
+                "参与 RTSP 路径拼接",
+                self._username_input,
+            ),
+            1,
+        )
+
+        self._machine_name_input = QLineEdit()
+        self._machine_name_input.setPlaceholderText("pc1")
+        self._machine_name_input.setMinimumWidth(180)
+        self._machine_name_input.setValidator(_machine_validator)
+        self._machine_name_input.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
+        self._machine_name_input.textChanged.connect(self.machine_name_changed.emit)
+        bar.addWidget(
+            self._build_auth_field_group(
+                "客户端 ID（设备名）",
+                "建议使用稳定的设备标识",
+                self._machine_name_input,
+            ),
+            1,
+        )
+
+        self._auth_secret_input = QLineEdit()
+        self._auth_secret_input.setPlaceholderText("请输入授权码 / API Key")
+        self._auth_secret_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self._auth_secret_input.setMinimumWidth(220)
+        self._auth_secret_input.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
+        self._auth_secret_input.setInputMethodHints(
+            Qt.InputMethodHint.ImhSensitiveData
+            | Qt.InputMethodHint.ImhNoPredictiveText
+            | Qt.InputMethodHint.ImhNoAutoUppercase
+        )
+        self._auth_secret_input.textChanged.connect(self.auth_secret_changed.emit)
+        bar.addWidget(
+            self._build_auth_field_group(
+                "授权码",
+                "输入时始终保持隐藏",
+                self._auth_secret_input,
+            ),
+            1,
+        )
+
+        return container
+
+    def _build_auth_field_group(
+        self,
+        title: str,
+        hint: str,
+        input_widget: QLineEdit,
+    ) -> QFrame:
+        """构建认证字段分组，统一输入区层次和间距。"""
+        group = QFrame()
+        group.setObjectName("authFieldGroup")
+
+        layout = QVBoxLayout(group)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(6)
+
+        title_label = QLabel(title)
+        title_label.setObjectName("authFieldTitle")
+        layout.addWidget(title_label)
+
+        hint_label = QLabel(hint)
+        hint_label.setObjectName("authFieldHint")
+        layout.addWidget(hint_label)
+
+        input_widget.setMinimumHeight(34)
+        layout.addWidget(input_widget)
+        return group
 
     def _build_action_bar(self) -> QHBoxLayout:
         """构建功能按钮行：测试连接、添加通道、保存配置、全部开始/停止。"""
@@ -296,7 +401,7 @@ class MainWindow(QMainWindow):
         return bar
 
     def _toggle_server_lock(self):
-        """切换 RTSP 服务器地址和客户端 ID 的锁定/解锁状态。"""
+        """切换全局配置的锁定/解锁状态。"""
         self.set_server_locked(not self._server_input.isReadOnly())
 
     def _show_help(self):
@@ -321,21 +426,23 @@ class MainWindow(QMainWindow):
         dlg.exec()
 
     def set_server_locked(self, locked: bool):
-        """设置 RTSP 服务器地址和客户端 ID 的锁定状态。
+        """设置全局配置的锁定状态。
 
         Args:
             locked: ``True`` 表示锁定（只读）。
         """
         self._server_input.setReadOnly(locked)
-        self._client_id_input.setReadOnly(locked)
+        self._username_input.setReadOnly(locked)
+        self._machine_name_input.setReadOnly(locked)
+        self._auth_secret_input.setReadOnly(locked)
         self._server_reconnect_interval_input.setReadOnly(locked)
         self._server_reconnect_max_attempts_input.setReadOnly(locked)
         if locked:
             self._lock_btn.setText("🔒")
-            self._lock_btn.setToolTip("点击解锁 RTSP 地址和客户端 ID")
+            self._lock_btn.setToolTip("点击解锁全局配置")
         else:
             self._lock_btn.setText("🔓")
-            self._lock_btn.setToolTip("锁定 RTSP 地址和客户端 ID，防止误修改")
+            self._lock_btn.setToolTip("锁定全局配置，防止误修改")
 
     def get_server_locked(self) -> bool:
         """获取 RTSP 服务器地址的锁定状态。"""
@@ -425,19 +532,35 @@ class MainWindow(QMainWindow):
         self._test_btn.setEnabled(not testing)
         self._test_btn.setText("测试中..." if testing else "测试连接")
 
-    # ── 客户端 ID ──
+    # ── 用户名 / 设备名 / 授权码 ──
 
-    def get_client_id(self) -> str:
-        return self._client_id_input.text()
+    def get_username(self) -> str:
+        return self._username_input.text()
 
-    def set_client_id(self, cid: str):
-        self._client_id_input.blockSignals(True)
-        self._client_id_input.setText(cid)
-        self._client_id_input.blockSignals(False)
+    def set_username(self, name: str):
+        self._username_input.blockSignals(True)
+        self._username_input.setText(name)
+        self._username_input.blockSignals(False)
 
-    def set_client_id_placeholder(self, placeholder: str):
-        """设置客户端 ID 输入框的 placeholder 文本。"""
-        self._client_id_input.setPlaceholderText(placeholder)
+    def get_machine_name(self) -> str:
+        return self._machine_name_input.text()
+
+    def set_machine_name(self, name: str):
+        self._machine_name_input.blockSignals(True)
+        self._machine_name_input.setText(name)
+        self._machine_name_input.blockSignals(False)
+
+    def set_machine_name_placeholder(self, placeholder: str):
+        """设置设备名输入框的 placeholder 文本。"""
+        self._machine_name_input.setPlaceholderText(placeholder)
+
+    def get_auth_secret(self) -> str:
+        return self._auth_secret_input.text()
+
+    def set_auth_secret(self, secret: str):
+        self._auth_secret_input.blockSignals(True)
+        self._auth_secret_input.setText(secret)
+        self._auth_secret_input.blockSignals(False)
 
     def add_card(self, card: StreamCardView):
         """向卡片列表添加一张卡片。"""

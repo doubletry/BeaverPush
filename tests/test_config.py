@@ -57,7 +57,9 @@ class TestAppConfig:
         cfg = AppConfig()
         assert cfg.rtsp_server == ""
         assert cfg.server_locked is False
-        assert cfg.client_id == ""
+        assert cfg.username == ""
+        assert cfg.machine_name == ""
+        assert cfg.auth_secret == ""
         assert cfg.server_reconnect_interval == 5
         assert cfg.server_reconnect_max_attempts == 0
         assert cfg.streams == []
@@ -66,10 +68,12 @@ class TestAppConfig:
         from beaverpush.models.config import CONFIG_DIR
         assert CONFIG_DIR.name == "BeaverPush"
 
-    def test_has_client_id(self):
-        """验证 AppConfig 包含 client_id 字段（无全局默认参数）"""
-        cfg = AppConfig(client_id="client01")
-        assert cfg.client_id == "client01"
+    def test_has_v2_auth_fields(self):
+        """验证 AppConfig 包含 v2 认证字段（无全局默认参数）"""
+        cfg = AppConfig(username="alice", machine_name="pc1", auth_secret="AKsecret")
+        assert cfg.username == "alice"
+        assert cfg.machine_name == "pc1"
+        assert cfg.auth_secret == "AKsecret"
         assert not hasattr(cfg, "default_codec")
         assert not hasattr(cfg, "default_width")
         assert not hasattr(cfg, "default_height")
@@ -94,7 +98,9 @@ class TestConfigPersistence:
             cfg = AppConfig(
                 rtsp_server="rtsp://test:8554",
                 server_locked=True,
-                client_id="my_client",
+                username="alice",
+                machine_name="pc1",
+                auth_secret="AKsecret123",
                 server_reconnect_interval=7,
                 server_reconnect_max_attempts=9,
             )
@@ -110,7 +116,9 @@ class TestConfigPersistence:
             loaded = load_config()
             assert loaded.rtsp_server == "rtsp://test:8554"
             assert loaded.server_locked is True
-            assert loaded.client_id == "my_client"
+            assert loaded.username == "alice"
+            assert loaded.machine_name == "pc1"
+            assert loaded.auth_secret == "AKsecret123"
             assert loaded.server_reconnect_interval == 7
             assert loaded.server_reconnect_max_attempts == 9
             assert len(loaded.streams) == 1
@@ -135,12 +143,32 @@ class TestConfigPersistence:
             loaded = load_config()
         assert loaded.server_reconnect_max_attempts == 12
 
+    def test_load_legacy_client_id_to_machine_name(self, tmp_path):
+        """旧配置中的 client_id 应迁移到 machine_name。"""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(
+            json.dumps(
+                {
+                    "rtsp_server": "rtsp://test:8554",
+                    "client_id": "old_client_uuid",
+                    "streams": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        with mock.patch("beaverpush.models.config.CONFIG_FILE", config_file):
+            loaded = load_config()
+        assert loaded.machine_name == "old_client_uuid"
+        assert loaded.username == ""
+
     def test_load_missing_file(self, tmp_path):
         config_file = tmp_path / "nonexistent.json"
         with mock.patch("beaverpush.models.config.CONFIG_FILE", config_file):
             cfg = load_config()
             assert cfg.rtsp_server == ""
-            assert cfg.client_id == ""
+            assert cfg.username == ""
+            assert cfg.machine_name == ""
+            assert cfg.auth_secret == ""
 
 
 class TestLoadStreamConfig:
