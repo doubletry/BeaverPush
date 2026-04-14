@@ -126,6 +126,7 @@ class TestStreamControllerUrlConstruction:
             assert ctrl._rtsp_url == "rtsp://alice:***@localhost:8554/alice/pc1/stream1"
             assert ctrl._preview_rtsp_url == "rtsp://alice:AKsecret123@localhost:8554/alice/pc1/stream1"
             assert "AKsecret123" not in str(mock_logger.call_args)
+            assert "rtsp://alice:***@localhost:8554/alice/pc1/stream1" in str(mock_logger.call_args)
 
     def test_url_format_v2_normalizes_server_and_encodes_auth(self):
         card = _make_mock_card()
@@ -160,6 +161,7 @@ class TestStreamControllerUrlConstruction:
             assert ctrl._rtsp_url == "rtsp://alice:***@localhost:8554/alice/pc1/stream1"
             assert ctrl._preview_rtsp_url == "rtsp://alice:A%40B%3AC%2F%25@localhost:8554/alice/pc1/stream1"
             assert "A@B:C/%" not in str(mock_logger.call_args)
+            assert "rtsp://alice:***@localhost:8554/alice/pc1/stream1" in str(mock_logger.call_args)
 
     def test_invalid_server_format_shows_error(self):
         card = _make_mock_card()

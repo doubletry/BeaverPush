@@ -79,7 +79,7 @@ def normalize_rtsp_server(rtsp_server: str) -> str:
 
 
 def _format_rtsp_netloc(hostname: str, port: int | None) -> str:
-    host = f"[{hostname}]" if ":" in hostname and not hostname.startswith("[") else hostname
+    host = f"[{hostname}]" if ":" in hostname else hostname
     return f"{host}:{port}" if port else host
 
 
