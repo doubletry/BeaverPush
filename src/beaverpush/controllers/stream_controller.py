@@ -440,6 +440,7 @@ class StreamController(QObject):
         else:
             # 仅在成功构建过完整 RTSP URL 后才允许打开预览，避免把脱敏 URL 传给 ffplay。
             if not self._preview_rtsp_url:
+                logger.warning("预览启动被跳过: ch={} 缺少完整 RTSP URL", self._channel_index)
                 return
             self._worker.start_preview_now(self._preview_rtsp_url)
             self._preview = True
