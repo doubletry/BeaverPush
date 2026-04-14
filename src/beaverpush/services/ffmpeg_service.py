@@ -100,8 +100,11 @@ def build_authenticated_rtsp_url(
         encoded_secret = "***" if mask_auth_secret else quote(auth_secret, safe="")
         netloc = f"{encoded_username}:{encoded_secret}@{netloc}"
 
-    # 用户名仅允许 _ -，设备名/流名称允许 . _ -；这些字符保留可读性且不会破坏 v2 路径分段语义。
-    path = "/" + "/".join(quote(segment, safe="._-") for segment in path_segments)
+    # 第一级用户名仅保留 _ -；后续设备名/流名称保留 . _ -，与当前 UI/帮助文档规则一致。
+    path = "/" + "/".join(
+        quote(segment, safe="_-" if index == 0 else "._-")
+        for index, segment in enumerate(path_segments)
+    )
     return urlunparse((parsed.scheme, netloc, path, "", "", ""))
 
 

@@ -125,7 +125,7 @@ class TestStreamControllerUrlConstruction:
             assert kwargs["rtsp_url"] == "rtsp://alice:AKsecret123@localhost:8554/alice/pc1/stream1"
             assert ctrl._rtsp_url == "rtsp://alice:***@localhost:8554/alice/pc1/stream1"
             assert ctrl._preview_rtsp_url == "rtsp://alice:AKsecret123@localhost:8554/alice/pc1/stream1"
-            _fmt, _channel, logged_url, *_rest = mock_logger.call_args[0]
+            logged_url = mock_logger.call_args.args[2]
             assert "AKsecret123" not in logged_url
             assert logged_url == "rtsp://alice:***@localhost:8554/alice/pc1/stream1"
 
@@ -161,7 +161,7 @@ class TestStreamControllerUrlConstruction:
             assert kwargs["rtsp_url"] == "rtsp://alice:A%40B%3AC%2F%25@localhost:8554/alice/pc1/stream1"
             assert ctrl._rtsp_url == "rtsp://alice:***@localhost:8554/alice/pc1/stream1"
             assert ctrl._preview_rtsp_url == "rtsp://alice:A%40B%3AC%2F%25@localhost:8554/alice/pc1/stream1"
-            _fmt, _channel, logged_url, *_rest = mock_logger.call_args[0]
+            logged_url = mock_logger.call_args.args[2]
             assert "A@B:C/%" not in logged_url
             assert logged_url == "rtsp://alice:***@localhost:8554/alice/pc1/stream1"
 
