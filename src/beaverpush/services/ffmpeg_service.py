@@ -79,6 +79,7 @@ def normalize_rtsp_server(rtsp_server: str) -> str:
 
 
 def _format_rtsp_netloc(hostname: str, port: int | None) -> str:
+    """格式化 RTSP URL 的 netloc，并为 IPv6 主机补上方括号。"""
     host = f"[{hostname}]" if ":" in hostname else hostname
     return f"{host}:{port}" if port else host
 
@@ -99,6 +100,7 @@ def build_authenticated_rtsp_url(
         encoded_secret = "***" if mask_auth_secret else quote(auth_secret, safe="")
         netloc = f"{encoded_username}:{encoded_secret}@{netloc}"
 
+    # 当前 UI 校验允许 . _ -，这些字符保留可读性且不会破坏 v2 路径分段语义。
     path = "/" + "/".join(quote(segment, safe="._-") for segment in path_segments)
     return urlunparse((parsed.scheme, netloc, path, "", "", ""))
 
