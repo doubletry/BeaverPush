@@ -21,6 +21,7 @@ from ..models.stream_model import StreamState
 from ..models.config import StreamConfig
 from ..services.ffmpeg_service import (
     FFmpegWorker, build_ffmpeg_command, friendly_error, check_rtsp_server_reachable,
+    build_authenticated_rtsp_url,
 )
 from ..services.connectivity_service import ConnectivityCheckWorker
 from ..services.device_service import probe_video_info, get_screen_refresh_rate, check_rtsp_reachable
@@ -87,6 +88,7 @@ class StreamController(QObject):
         self._framerate = ""
         self._bitrate = ""
         self._rtsp_url = ""
+        self._preview_rtsp_url = ""
         self._source_reconnect_interval = 5
         self._source_reconnect_max_attempts = 0
 
@@ -254,19 +256,26 @@ class StreamController(QObject):
             self._card.set_stream_name(effective_name)
 
         # v2 推流地址：rtsp://username:auth_secret@host:port/username/machine/channel
-        from urllib.parse import urlparse, urlunparse
-        parsed = urlparse(rtsp_server)
-        auth_host = f"{username}:{auth_secret}@{parsed.hostname}"
-        if parsed.port:
-            auth_host += f":{parsed.port}"
-        stream_path = f"/{username}/{machine_name}/{effective_name}"
-        rtsp_url = urlunparse((
-            parsed.scheme or "rtsp",
-            auth_host,
-            stream_path,
-            "", "", "",
-        ))
-        self._rtsp_url = rtsp_url
+        try:
+            rtsp_url = build_authenticated_rtsp_url(
+                rtsp_server,
+                [username, machine_name, effective_name],
+                username=username,
+                auth_secret=auth_secret,
+            )
+            masked_rtsp_url = build_authenticated_rtsp_url(
+                rtsp_server,
+                [username, machine_name, effective_name],
+                username=username,
+                auth_secret=auth_secret,
+                mask_auth_secret=True,
+            )
+        except ValueError as exc:
+            self._set_state(StreamState.IDLE)
+            self._card.show_error(str(exc))
+            return
+        self._rtsp_url = masked_rtsp_url
+        self._preview_rtsp_url = rtsp_url
         codec = self._video_codec if self._video_codec != "自动" else ""
 
         width = self._width
@@ -350,7 +359,7 @@ class StreamController(QObject):
 
         logger.info(
             "推流启动: ch={} url={} source={}/{}",
-            self._channel_index, rtsp_url, self._source_type, self._source_path
+            self._channel_index, masked_rtsp_url, self._source_type, self._source_path
         )
         self._report_status(f"通道 {self._channel_index + 1} 开始推流")
         self._set_state(StreamState.STARTING)
@@ -426,7 +435,7 @@ class StreamController(QObject):
             self._preview = False
             self._card.set_preview_active(False)
         else:
-            self._worker.start_preview_now(self._rtsp_url)
+            self._worker.start_preview_now(self._preview_rtsp_url or self._rtsp_url)
             self._preview = True
             self._card.set_preview_active(True)
 
@@ -451,6 +460,8 @@ class StreamController(QObject):
             self._set_state(StreamState.STOPPING)
             self._worker.stop()
         else:
+            self._rtsp_url = ""
+            self._preview_rtsp_url = ""
             self._set_state(StreamState.IDLE)
 
     def force_stop(self):
@@ -463,6 +474,8 @@ class StreamController(QObject):
             self._worker.stop()
             self._worker.wait(3000)
         self._worker = None
+        self._rtsp_url = ""
+        self._preview_rtsp_url = ""
         self._set_state(StreamState.IDLE)
 
     def _on_worker_status(self, status: str):
@@ -501,6 +514,8 @@ class StreamController(QObject):
         self._preview = False
         self._card.set_preview_active(False)
         self._worker = None
+        self._rtsp_url = ""
+        self._preview_rtsp_url = ""
         if self._reconnect_timer.isActive():
             self._set_state(StreamState.RECONNECTING)
             return

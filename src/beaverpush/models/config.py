@@ -73,7 +73,7 @@ class AppConfig:
         server_locked:   RTSP 服务器地址是否锁定
         username:        推流用户名（window-to-web 账户名，推流路径第一级）
         machine_name:    设备名（推流路径第二级，留空时使用主板 UUID）
-        auth_secret:     认证授权码（密码或 API Key）
+        auth_secret:     认证授权码（密码或 API Key，会按当前设计明文保存在本地 config.json）
         streams:         推流通道配置列表，每个元素为 :class:`StreamConfig` 的字典形式
     """
 
@@ -133,7 +133,10 @@ def load_config() -> AppConfig:
 
 
 def save_config(cfg: AppConfig):
-    """保存配置到文件"""
+    """保存配置到文件。
+
+    注意：``auth_secret`` 会按当前设计以明文写入本地 ``config.json``。
+    """
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     CONFIG_FILE.write_text(
         json.dumps(asdict(cfg), ensure_ascii=False, indent=2),

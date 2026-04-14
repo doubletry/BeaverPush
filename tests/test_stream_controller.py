@@ -121,6 +121,59 @@ class TestStreamControllerUrlConstruction:
             mock_build.assert_called_once()
             _, kwargs = mock_build.call_args
             assert kwargs["rtsp_url"] == "rtsp://alice:AKsecret123@localhost:8554/alice/pc1/stream1"
+            assert ctrl._rtsp_url == "rtsp://alice:***@localhost:8554/alice/pc1/stream1"
+            assert ctrl._preview_rtsp_url == "rtsp://alice:AKsecret123@localhost:8554/alice/pc1/stream1"
+
+    def test_url_format_v2_normalizes_server_and_encodes_auth(self):
+        card = _make_mock_card()
+        ctrl = StreamController(
+            card=card,
+            channel_index=0,
+            rtsp_server_getter=lambda: "localhost:8554",
+            username_getter=lambda: "alice",
+            machine_name_getter=lambda: "pc1",
+            auth_secret_getter=lambda: "A@B:C/%",
+        )
+        ctrl._source_type = "video"
+        ctrl._source_path = __file__
+        ctrl._stream_name = "stream1"
+        ctrl._video_codec = "libx264"
+
+        with mock.patch(
+            "beaverpush.controllers.stream_controller.build_ffmpeg_command"
+        ) as mock_build, mock.patch(
+            "beaverpush.controllers.stream_controller.FFmpegWorker"
+        ), mock.patch(
+            "beaverpush.controllers.stream_controller.probe_video_info",
+            return_value={},
+        ), mock.patch(
+            "beaverpush.controllers.stream_controller.logger.info"
+        ) as mock_logger:
+            mock_build.return_value = ["ffmpeg", "-i", "test"]
+            ctrl.start_stream()
+
+            _, kwargs = mock_build.call_args
+            assert kwargs["rtsp_url"] == "rtsp://alice:A%40B%3AC%2F%25@localhost:8554/alice/pc1/stream1"
+            assert ctrl._rtsp_url == "rtsp://alice:***@localhost:8554/alice/pc1/stream1"
+            assert ctrl._preview_rtsp_url == "rtsp://alice:A%40B%3AC%2F%25@localhost:8554/alice/pc1/stream1"
+            assert "A@B:C/%" not in str(mock_logger.call_args)
+
+    def test_invalid_server_format_shows_error(self):
+        card = _make_mock_card()
+        ctrl = StreamController(
+            card=card,
+            channel_index=0,
+            rtsp_server_getter=lambda: "http://localhost:8554",
+            username_getter=lambda: "alice",
+            machine_name_getter=lambda: "pc1",
+            auth_secret_getter=lambda: "secret",
+        )
+        ctrl._source_type = "video"
+        ctrl._source_path = __file__
+        ctrl._stream_name = "stream1"
+
+        ctrl.start_stream()
+        card.show_error.assert_called_with("RTSP 服务器地址格式不正确，应为 rtsp://host[:port]")
 
     def test_missing_username_shows_error(self):
         card = _make_mock_card()
@@ -847,7 +900,8 @@ class TestPreviewToggle:
         ):
             mock_build.return_value = ["ffmpeg", "-i", "test"]
             ctrl.start_stream()
-            assert ctrl._rtsp_url == "rtsp://alice:secret@localhost:8554/alice/pc1/s1"
+            assert ctrl._rtsp_url == "rtsp://alice:***@localhost:8554/alice/pc1/s1"
+            assert ctrl._preview_rtsp_url == "rtsp://alice:secret@localhost:8554/alice/pc1/s1"
 
     def test_to_config_preview_always_false(self):
         card = _make_mock_card()

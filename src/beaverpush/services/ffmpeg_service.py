@@ -33,6 +33,7 @@ import subprocess
 import re
 import threading
 import time
+from urllib.parse import quote, urlparse, urlunparse
 
 from PySide6.QtCore import QThread, Signal
 
@@ -55,6 +56,50 @@ READY_LINE_KEYWORDS = (
 def _make_even(v: int) -> int:
     """将值调整为最近的偶数（FFmpeg 要求宽高为偶数）。"""
     return v if v % 2 == 0 else v + 1
+
+
+def normalize_rtsp_server(rtsp_server: str) -> str:
+    """规范化 RTSP 服务器地址并校验基本格式。"""
+    normalized = rtsp_server.strip()
+    if "://" not in normalized:
+        normalized = f"rtsp://{normalized}"
+
+    parsed = urlparse(normalized)
+    if (
+        parsed.scheme != "rtsp"
+        or not parsed.hostname
+        or parsed.path not in ("", "/")
+        or parsed.params
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError("RTSP 服务器地址格式不正确，应为 rtsp://host[:port]")
+    return normalized
+
+
+def _format_rtsp_host(hostname: str, port: int | None) -> str:
+    host = f"[{hostname}]" if ":" in hostname and not hostname.startswith("[") else hostname
+    return f"{host}:{port}" if port else host
+
+
+def build_authenticated_rtsp_url(
+    rtsp_server: str,
+    path_segments: list[str],
+    username: str = "",
+    auth_secret: str = "",
+    *,
+    mask_auth_secret: bool = False,
+) -> str:
+    """构建带认证信息的 RTSP URL。"""
+    parsed = urlparse(normalize_rtsp_server(rtsp_server))
+    netloc = _format_rtsp_host(parsed.hostname or "", parsed.port)
+    if username and auth_secret:
+        encoded_username = quote(username, safe="")
+        encoded_secret = "***" if mask_auth_secret else quote(auth_secret, safe="")
+        netloc = f"{encoded_username}:{encoded_secret}@{netloc}"
+
+    path = "/" + "/".join(quote(segment, safe="._-") for segment in path_segments)
+    return urlunparse((parsed.scheme, netloc, path, "", "", ""))
 
 
 class FFmpegWorker(QThread):
@@ -628,24 +673,21 @@ def check_rtsp_server_reachable(
     machine_name: str = "",
 ) -> tuple[bool, str]:
     """检测 RTSP 推流服务器是否可达（v2：支持认证 + 三级路径）。"""
-    from urllib.parse import urlparse, urlunparse
-
-    parsed = urlparse(rtsp_server)
-    host_part = parsed.hostname or ""
-    if parsed.port:
-        host_part += f":{parsed.port}"
-
-    # 构建带认证的测试 URL
-    if username and auth_secret:
-        auth_host = f"{username}:{auth_secret}@{host_part}"
-        test_path = f"/{username}/{machine_name or '_test'}/__connection_test__"
-    else:
-        auth_host = host_part
-        test_path = "/__connection_test__"
-
-    test_url = urlunparse((
-        parsed.scheme or "rtsp", auth_host, test_path, "", "", "",
-    ))
+    try:
+        if username and auth_secret:
+            test_url = build_authenticated_rtsp_url(
+                rtsp_server,
+                [username, machine_name or "_test", "__connection_test__"],
+                username=username,
+                auth_secret=auth_secret,
+            )
+        else:
+            test_url = build_authenticated_rtsp_url(
+                rtsp_server,
+                ["__connection_test__"],
+            )
+    except ValueError as exc:
+        return False, str(exc)
 
     try:
         result = subprocess.run(
