@@ -174,6 +174,8 @@ class TestStreamControllerUrlConstruction:
 
         ctrl.start_stream()
         card.show_error.assert_called_with("RTSP 服务器地址格式不正确，应为 rtsp://host[:port]")
+        assert ctrl._state == StreamState.IDLE
+        assert ctrl._worker is None
 
     def test_missing_username_shows_error(self):
         card = _make_mock_card()

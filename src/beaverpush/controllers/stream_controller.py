@@ -397,10 +397,9 @@ class StreamController(QObject):
             lambda ok, message, current=worker: self._on_preflight_completed(current, ok, message)
         )
         worker.finished.connect(worker.deleteLater)
-        worker.start()
-
         self._report_status(f"通道 {self._channel_index + 1} 正在检查连接")
         self._set_state(StreamState.STARTING, "检查连接中...")
+        worker.start()
 
     def _on_preflight_stage_changed(self, worker: ConnectivityCheckWorker, stage: str):
         if worker is not self._preflight_worker:
