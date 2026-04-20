@@ -229,6 +229,27 @@ class TestCodecOptionsFiltering:
         finally:
             sc.CODEC_OPTIONS = original
 
+    def test_refresh_available_codecs_updates_existing_card_and_falls_back(self):
+        from beaverpush.views import stream_card as sc
+        original = sc.CODEC_OPTIONS[:]
+        app = QApplication.instance() or QApplication([])
+        try:
+            card = StreamCardView(0)
+            try:
+                card.set_codec("h264_qsv")
+                sc.set_available_codecs(["libx264", "libx265", "h264_nvenc"])
+                card.refresh_available_codecs()
+                items = [card._codec_combo.itemText(i)
+                         for i in range(card._codec_combo.count())]
+                assert "h264_qsv" not in items
+                assert "h264_nvenc" in items
+                assert card.get_codec() == "自动"
+            finally:
+                card.deleteLater()
+                app.processEvents()
+        finally:
+            sc.CODEC_OPTIONS = original
+
 
 class TestPositionBadge:
     """验证卡片左上角的序号徽标。"""

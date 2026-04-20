@@ -676,6 +676,33 @@ class StreamCardView(QFrame):
         if idx >= 0:
             self._codec_combo.setCurrentIndex(idx)
 
+    def refresh_available_codecs(self):
+        """把当前全局 ``CODEC_OPTIONS`` 同步到本卡片的编码器下拉框。
+
+        主要用于启动后异步完成硬件探测时，刷新那些已经创建好的卡片。
+        若当前选中的编码器已被裁剪，则回退到 ``"自动"``（若存在），
+        否则回退到下拉框第一个选项。
+        """
+        current = self._codec_combo.currentText()
+        items = [self._codec_combo.itemText(i) for i in range(self._codec_combo.count())]
+        if items == CODEC_OPTIONS:
+            return
+
+        fallback = current
+        if fallback not in CODEC_OPTIONS:
+            fallback = "自动" if "自动" in CODEC_OPTIONS else (
+                CODEC_OPTIONS[0] if CODEC_OPTIONS else ""
+            )
+
+        self._codec_combo.blockSignals(True)
+        self._codec_combo.clear()
+        self._codec_combo.addItems(CODEC_OPTIONS)
+        if fallback:
+            idx = self._codec_combo.findText(fallback)
+            if idx >= 0:
+                self._codec_combo.setCurrentIndex(idx)
+        self._codec_combo.blockSignals(False)
+
     def get_width(self) -> str:
         return self._width_input.text()
 

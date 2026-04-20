@@ -73,8 +73,9 @@ class AppController(QObject):
         # 探测当前机器实际可用的编码器，UI 中只展示这些编码器，
         # 避免选了 nvenc/qsv 但硬件不支持时启动后才报错。
         # 探测会拉起若干次 ffmpeg 子进程，可能耗时数百毫秒到数秒，
-        # 所以推迟到事件循环开始后执行；早于此时新建的卡片暂时使用默认全集，
-        # 探测完成后调用 :func:`stream_card.set_available_codecs` 影响后续新建卡片。
+        # 所以推迟到事件循环开始后执行；探测完成后既更新模块级默认值，
+        # 也回写到已经创建好的卡片，避免“当前机器没有 QSV，但恢复出来的
+        # 已有卡片仍显示 qsv 选项”的 UI 残留。
         QTimer.singleShot(0, self._detect_and_apply_codecs)
 
         # 同步初始状态到 View
@@ -177,6 +178,8 @@ class AppController(QObject):
         """在 UI 线程把探测结果应用到 ``stream_card`` 模块级配置。"""
         if codecs:
             stream_card_module.set_available_codecs(codecs)
+            for ctrl in self._controllers:
+                ctrl.card.refresh_available_codecs()
             logger.info("可用编码器: {}", codecs)
         else:
             logger.warning("未探测到任何可用编码器，保留默认编码器选项")
