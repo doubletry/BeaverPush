@@ -232,7 +232,7 @@ class TestDetectGpuVendorsWindows:
             assert encoder_probe._detect_gpu_vendors_windows(timeout=5.0) is None
 
 
-
+class TestDetectAvailableEncoders:
     def test_only_software_when_no_hardware(self):
         # 软件 + 硬件编码器都在 listing 中；硬件实际探测全部失败
         all_listed = set(encoder_probe.SOFTWARE_ENCODERS) | set(encoder_probe.HARDWARE_ENCODERS)

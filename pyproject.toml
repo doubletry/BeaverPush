@@ -13,7 +13,7 @@ dependencies = [
     "loguru>=0.7.0,<1.0.0",
     "nuitka>=4.0.3,<5.0.0",
     "numpy>=1.26.0,<3.0.0",
-    "hikcamera",
+    "hikcamera==2.0.0",
 ]
 
 [project.scripts]

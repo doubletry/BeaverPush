@@ -157,14 +157,16 @@ class AppController(QObject):
     def _detect_and_apply_codecs(self):
         """异步在后台线程探测可用编码器并应用到 UI。
 
-        放在后台线程是为了避免「启动后窗口先空白显示一段时间」——之前
-        通过 ``QTimer.singleShot(0, ...)`` 调用是同步执行的，
-        ``detect_available_encoders()`` 内部要拉起若干个 ffmpeg 子进程，
-        在主事件循环里阻塞数百毫秒到 1 秒，正好对应用户看到的"空白窗口"。
-        改为：
+        放在后台线程是为了避免「启动后窗口先空白显示一段时间」——若在主
+        线程直接执行探测，``detect_available_encoders()`` 内部要拉起若干个
+        ffmpeg 子进程，在主事件循环里阻塞数百毫秒到 1 秒，正好对应用户
+        看到的“空白窗口”。
+
+        当前实现为：
             * 后台 ``threading.Thread`` 跑探测；
-            * 探测完成后用 ``QTimer.singleShot(0, ...)`` 把结果回传到 UI 线程
-              再修改 ``stream_card`` 的下拉框（保证只在 UI 线程动 UI 状态）。
+            * 探测完成后通过 ``codecs_detected`` Signal 把结果投递回 UI 线程；
+            * 再由 UI 线程修改 ``stream_card`` 的下拉框（保证只在 UI 线程动
+              UI 状态）。
         """
         import threading
 

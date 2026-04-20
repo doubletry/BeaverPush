@@ -41,26 +41,25 @@ SOURCE_TYPES: list[tuple[str, str]] = [
 # ── 编码器选项 ──
 # 默认包含全部可能的编码器；运行时由 :func:`set_available_codecs` 根据硬件
 # 探测结果裁剪（不可用的硬件编码器会被移除，避免用户选了之后启动失败）。
-CODEC_OPTIONS: list[str] = [
+ALL_CODEC_OPTIONS: list[str] = [
     "自动", "copy",
     "libx264", "libx265",
     "h264_nvenc", "hevc_nvenc",
     "h264_qsv", "hevc_qsv",
 ]
+CODEC_OPTIONS: list[str] = ALL_CODEC_OPTIONS[:]
 
 
 def set_available_codecs(available: list[str]) -> None:
     """根据硬件探测结果裁剪 :data:`CODEC_OPTIONS`。
 
     * 始终保留 ``"自动"`` 与 ``"copy"`` 两个非编码器选项。
-    * 顺序按 :data:`CODEC_OPTIONS` 原始顺序保留，便于下拉框稳定。
+    * 顺序按 :data:`ALL_CODEC_OPTIONS` 原始顺序保留，便于下拉框稳定。
     * 必须在创建 :class:`StreamCardView` 之前调用才能影响新建的卡片。
     """
     global CODEC_OPTIONS
     keep = set(available) | {"自动", "copy"}
-    base = ["自动", "copy", "libx264", "libx265",
-            "h264_nvenc", "hevc_nvenc", "h264_qsv", "hevc_qsv"]
-    CODEC_OPTIONS = [c for c in base if c in keep]
+    CODEC_OPTIONS = [c for c in ALL_CODEC_OPTIONS if c in keep]
 
 
 class StreamCardView(QFrame):
