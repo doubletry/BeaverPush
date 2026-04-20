@@ -70,17 +70,29 @@ def _ffmpeg_lists_encoder(name: str, timeout: float = 5.0) -> bool:
 
 
 def _probe_encoder(name: str, timeout: float = 8.0) -> bool:
-    """尝试用 1 帧 ``testsrc`` 实际跑一次该编码器，返回是否成功。"""
+    """尝试用 1 帧 ``testsrc`` 实际跑一次该编码器，返回是否成功。
+
+    对硬件编码器 (``*_qsv`` / ``*_nvenc``) 显式加上 ``-init_hw_device``，
+    强制 FFmpeg 创建对应的硬件会话——若机器上没有 Intel iGPU 或
+    NVIDIA GPU，对应的 device init 会失败，进程返回非零，从而避免出现
+    "ffmpeg 内置了 QSV 但用户机器只有 N 卡也被探测为可用" 的误报。
+    """
+    cmd = [get_ffmpeg(), "-hide_banner", "-y"]
+    # 硬件初始化前置：不存在对应硬件时 ffmpeg 会直接退出非 0
+    if name.endswith("_qsv"):
+        cmd += ["-init_hw_device", "qsv=hw:hw_any"]
+    elif name.endswith("_nvenc"):
+        cmd += ["-init_hw_device", "cuda=cu"]
+    cmd += [
+        "-f", "lavfi",
+        "-i", "testsrc=duration=1:size=320x240:rate=1",
+        "-frames:v", "1",
+        "-c:v", name,
+        "-f", "null", "-",
+    ]
     try:
         result = subprocess.run(
-            [
-                get_ffmpeg(), "-hide_banner", "-y",
-                "-f", "lavfi",
-                "-i", "testsrc=duration=1:size=320x240:rate=1",
-                "-frames:v", "1",
-                "-c:v", name,
-                "-f", "null", "-",
-            ],
+            cmd,
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -88,7 +100,21 @@ def _probe_encoder(name: str, timeout: float = 8.0) -> bool:
         )
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
         return False
-    return result.returncode == 0
+    if result.returncode != 0:
+        return False
+    # 即使返回 0，也再扫一遍 stderr 中 device 初始化相关的失败标志，
+    # 因为某些 QSV 实现会在软件回退后仍然返回 0。
+    stderr_lower = (result.stderr or "").lower()
+    bad_markers = (
+        "device creation failed",
+        "failed to create",
+        "cannot load",
+        "no device available",
+        "error initializing",
+    )
+    if any(m in stderr_lower for m in bad_markers):
+        return False
+    return True
 
 
 def detect_available_encoders() -> list[str]:

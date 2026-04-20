@@ -10,10 +10,11 @@ from unittest import mock
 from beaverpush.services import encoder_probe
 
 
-def _fake_completed(returncode=0, stdout=""):
+def _fake_completed(returncode=0, stdout="", stderr=""):
     cp = mock.MagicMock()
     cp.returncode = returncode
     cp.stdout = stdout
+    cp.stderr = stderr
     return cp
 
 
@@ -75,6 +76,61 @@ class TestProbeEncoder:
             side_effect=sp.TimeoutExpired(cmd="ffmpeg", timeout=5),
         ):
             assert encoder_probe._probe_encoder("h264_nvenc") is False
+
+    def test_qsv_probe_uses_init_hw_device(self):
+        captured = {}
+
+        def fake_run(cmd, **kwargs):
+            captured["cmd"] = list(cmd)
+            return _fake_completed(returncode=0)
+
+        with mock.patch(
+            "beaverpush.services.encoder_probe.subprocess.run",
+            side_effect=fake_run,
+        ):
+            assert encoder_probe._probe_encoder("h264_qsv") is True
+        assert "-init_hw_device" in captured["cmd"]
+        idx = captured["cmd"].index("-init_hw_device")
+        assert captured["cmd"][idx + 1].startswith("qsv=")
+
+    def test_nvenc_probe_uses_init_hw_device(self):
+        captured = {}
+
+        def fake_run(cmd, **kwargs):
+            captured["cmd"] = list(cmd)
+            return _fake_completed(returncode=0)
+
+        with mock.patch(
+            "beaverpush.services.encoder_probe.subprocess.run",
+            side_effect=fake_run,
+        ):
+            assert encoder_probe._probe_encoder("hevc_nvenc") is True
+        assert "-init_hw_device" in captured["cmd"]
+        idx = captured["cmd"].index("-init_hw_device")
+        assert captured["cmd"][idx + 1].startswith("cuda")
+
+    def test_software_probe_does_not_use_init_hw_device(self):
+        captured = {}
+
+        def fake_run(cmd, **kwargs):
+            captured["cmd"] = list(cmd)
+            return _fake_completed(returncode=0)
+
+        with mock.patch(
+            "beaverpush.services.encoder_probe.subprocess.run",
+            side_effect=fake_run,
+        ):
+            assert encoder_probe._probe_encoder("libx264") is True
+        assert "-init_hw_device" not in captured["cmd"]
+
+    def test_returncode_zero_but_stderr_failure_marker_means_unavailable(self):
+        """某些 QSV 实现即使 device 创建失败仍以 0 退出，需要扫 stderr。"""
+        bad_stderr = "Device creation failed: -3.\nError initializing the MFX session\n"
+        with mock.patch(
+            "beaverpush.services.encoder_probe.subprocess.run",
+            return_value=_fake_completed(returncode=0, stderr=bad_stderr),
+        ):
+            assert encoder_probe._probe_encoder("h264_qsv") is False
 
 
 class TestDetectAvailableEncoders:

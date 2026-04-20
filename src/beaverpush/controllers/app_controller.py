@@ -148,21 +148,38 @@ class AppController(QObject):
         self._server_reconnect_max_attempts = self._parse_non_negative_int(value, 0)
 
     def _detect_and_apply_codecs(self):
-        """启动后异步探测可用编码器并应用到 UI。
+        """异步在后台线程探测可用编码器并应用到 UI。
 
-        放到事件循环里执行，主窗口能先显示出来，避免「打开软件后立即推流
-        导致软件卡死一段时间」——探测过程中如果还有 ``auto_start`` 的通道
-        正在启动，至少 UI 是已经能响应的。
+        放在后台线程是为了避免「启动后窗口先空白显示一段时间」——之前
+        通过 ``QTimer.singleShot(0, ...)`` 调用是同步执行的，
+        ``detect_available_encoders()`` 内部要拉起若干个 ffmpeg 子进程，
+        在主事件循环里阻塞数百毫秒到 1 秒，正好对应用户看到的"空白窗口"。
+        改为：
+            * 后台 ``threading.Thread`` 跑探测；
+            * 探测完成后用 ``QTimer.singleShot(0, ...)`` 把结果回传到 UI 线程
+              再修改 ``stream_card`` 的下拉框（保证只在 UI 线程动 UI 状态）。
         """
-        try:
-            available_codecs = detect_available_encoders()
-            if available_codecs:
-                stream_card_module.set_available_codecs(available_codecs)
-                logger.info("可用编码器: {}", available_codecs)
-            else:
-                logger.warning("未探测到任何可用编码器，保留默认编码器选项")
-        except Exception:
-            logger.exception("编码器探测失败，回退使用全部编码器选项")
+        import threading
+
+        def _worker():
+            try:
+                codecs = detect_available_encoders()
+            except Exception:
+                logger.exception("编码器探测失败，回退使用全部编码器选项")
+                codecs = []
+            QTimer.singleShot(0, lambda c=codecs: self._apply_detected_codecs(c))
+
+        threading.Thread(
+            target=_worker, name="encoder-probe", daemon=True,
+        ).start()
+
+    def _apply_detected_codecs(self, codecs: list[str]):
+        """在 UI 线程把探测结果应用到 ``stream_card`` 模块级配置。"""
+        if codecs:
+            stream_card_module.set_available_codecs(codecs)
+            logger.info("可用编码器: {}", codecs)
+        else:
+            logger.warning("未探测到任何可用编码器，保留默认编码器选项")
 
     def _on_start_all(self):
         """全部开始推流。"""
