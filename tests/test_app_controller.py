@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 import pytest
 from PySide6.QtWidgets import QApplication
 
@@ -164,3 +166,58 @@ def test_apply_detected_codecs_refreshes_existing_cards(controller):
         assert b.card.get_codec() == "自动"
     finally:
         sc.CODEC_OPTIONS = original
+
+
+def test_async_codec_probe_refreshes_cards_created_before_probe(monkeypatch):
+    """关键回归：后台线程探测完成后，必须真正把结果送回 UI 线程。
+
+    之前实现是在 Python 工作线程里直接调用 ``QTimer.singleShot(0, ...)``，
+    这在 PySide 下不会把回调投递到主线程事件循环，导致启动时先创建的卡片
+    永远保留默认 ``CODEC_OPTIONS``（含 QSV），Windows 用户就会继续看到
+    ``h264_qsv`` / ``hevc_qsv``。
+    """
+    from beaverpush.views import stream_card as sc
+
+    monkeypatch.setattr(app_ctrl_module, "load_config", lambda: AppConfig())
+    monkeypatch.setattr(app_ctrl_module, "save_config", lambda cfg: None)
+
+    def fake_detect_available_encoders():
+        # 给主线程一个机会先创建 stream card，再由后台线程回刷编码器列表。
+        time.sleep(0.05)
+        return ["libx264", "libx265", "h264_nvenc"]
+
+    monkeypatch.setattr(
+        app_ctrl_module, "detect_available_encoders", fake_detect_available_encoders,
+    )
+
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    original = sc.CODEC_OPTIONS[:]
+    try:
+        ctrl = AppController(window, app)
+        stream = ctrl.add_stream()
+        stream.card.set_codec("h264_qsv")
+
+        deadline = time.time() + 2.0
+        while time.time() < deadline:
+            app.processEvents()
+            items = [
+                stream.card._codec_combo.itemText(i)
+                for i in range(stream.card._codec_combo.count())
+            ]
+            if "h264_qsv" not in items and "h264_nvenc" in items:
+                break
+            time.sleep(0.01)
+
+        items = [
+            stream.card._codec_combo.itemText(i)
+            for i in range(stream.card._codec_combo.count())
+        ]
+        assert "h264_qsv" not in items
+        assert "hevc_qsv" not in items
+        assert "h264_nvenc" in items
+        assert stream.card.get_codec() == "自动"
+    finally:
+        sc.CODEC_OPTIONS = original
+        window.deleteLater()
+        app.processEvents()

@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QObject, QTimer, Qt
+from PySide6.QtCore import QObject, QTimer, Qt, Signal
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
 from PySide6.QtGui import QAction, QCloseEvent, QIcon, QPixmap
 
@@ -48,6 +48,9 @@ class AppController(QObject):
         parent: 父 QObject。
     """
 
+    # 后台编码器探测完成后，把结果安全地回传到 UI 线程应用。
+    codecs_detected = Signal(list)
+
     def __init__(self, window: MainWindow, app: QApplication,
                  parent: QObject | None = None):
         super().__init__(parent)
@@ -66,6 +69,9 @@ class AppController(QObject):
         self._test_worker: ConnectivityCheckWorker | None = None
         # 加载配置过程中跳过自动保存，避免在恢复期间反复写盘。
         self._loading_config: bool = False
+        self.codecs_detected.connect(
+            self._apply_detected_codecs, Qt.ConnectionType.QueuedConnection,
+        )
 
         # 获取主板 UUID 作为默认设备名
         self._default_machine_name = get_motherboard_uuid()
@@ -168,7 +174,7 @@ class AppController(QObject):
             except Exception:
                 logger.exception("编码器探测失败，回退使用全部编码器选项")
                 codecs = []
-            QTimer.singleShot(0, lambda c=codecs: self._apply_detected_codecs(c))
+            self.codecs_detected.emit(codecs)
 
         threading.Thread(
             target=_worker, name="encoder-probe", daemon=True,

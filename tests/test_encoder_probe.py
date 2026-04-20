@@ -198,6 +198,40 @@ class TestDetectGpuVendorsLinux:
             assert encoder_probe._detect_gpu_vendors_linux(timeout=5.0) is None
 
 
+class TestDetectGpuVendorsWindows:
+    def test_powershell_name_list(self):
+        stdout = (
+            "NVIDIA GeForce RTX 4070\n"
+            "Microsoft Basic Render Driver\n"
+        )
+        with mock.patch(
+            "beaverpush.services.encoder_probe.subprocess.run",
+            return_value=_fake_completed(stdout=stdout),
+        ):
+            assert encoder_probe._detect_gpu_vendors_windows(timeout=5.0) == {"nvidia"}
+
+    def test_wmic_value_output(self):
+        stdout = (
+            "Name=NVIDIA GeForce RTX 4070\n"
+            "\n"
+            "Name=Intel(R) UHD Graphics 770\n"
+        )
+        with mock.patch(
+            "beaverpush.services.encoder_probe.subprocess.run",
+            return_value=_fake_completed(stdout=stdout),
+        ):
+            assert encoder_probe._detect_gpu_vendors_windows(timeout=5.0) == {
+                "nvidia", "intel",
+            }
+
+    def test_commands_missing_returns_none(self):
+        with mock.patch(
+            "beaverpush.services.encoder_probe.subprocess.run",
+            side_effect=FileNotFoundError(),
+        ):
+            assert encoder_probe._detect_gpu_vendors_windows(timeout=5.0) is None
+
+
 
     def test_only_software_when_no_hardware(self):
         # 软件 + 硬件编码器都在 listing 中；硬件实际探测全部失败
