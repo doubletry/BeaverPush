@@ -404,6 +404,47 @@ class TestBuildFfmpegCommandEncoding:
         assert "p1" in cmd
         assert "ll" in cmd
 
+    def test_nvenc_qsv_webrtc_compat_args(self):
+        """NVENC/QSV 必须输出 -bf 0 与 -g <gop> 以便 mediamtx 转 WebRTC 后能被浏览器解码。
+
+        h264_nvenc 还需 ``-profile:v main`` 与主流浏览器实现对齐。
+        """
+        for codec in ("h264_nvenc", "hevc_nvenc", "h264_qsv", "hevc_qsv"):
+            cmd = build_ffmpeg_command(
+                source_type="screen",
+                source_path="offset:0,0,1920,1080",
+                rtsp_url="rtsp://localhost:8554/c/s",
+                video_codec=codec,
+                framerate="30",
+            )
+            assert "-bf" in cmd, codec
+            assert cmd[cmd.index("-bf") + 1] == "0", codec
+            assert "-g" in cmd, codec
+            # framerate=30 → gop=60
+            assert cmd[cmd.index("-g") + 1] == "60", codec
+
+        h264_cmd = build_ffmpeg_command(
+            source_type="hikcamera", source_path="SN001",
+            rtsp_url="rtsp://localhost:8554/c/s",
+            video_codec="h264_nvenc",
+            width="1920", height="1080", framerate="30",
+        )
+        assert "-profile:v" in h264_cmd
+        assert h264_cmd[h264_cmd.index("-profile:v") + 1] == "main"
+
+    def test_software_codecs_no_extra_webrtc_args(self):
+        """libx264/libx265 已经默认无 B 帧 + 合理 GOP，不应额外注入 -bf/-g。"""
+        for codec in ("libx264", "libx265"):
+            cmd = build_ffmpeg_command(
+                source_type="screen",
+                source_path="offset:0,0,1920,1080",
+                rtsp_url="rtsp://localhost:8554/c/s",
+                video_codec=codec,
+                framerate="30",
+            )
+            assert "-bf" not in cmd, codec
+            assert "-g" not in cmd, codec
+
     def test_bitrate_applied(self):
         cmd = build_ffmpeg_command(
             source_type="screen",

@@ -72,16 +72,10 @@ class AppController(QObject):
 
         # 探测当前机器实际可用的编码器，UI 中只展示这些编码器，
         # 避免选了 nvenc/qsv 但硬件不支持时启动后才报错。
-        # 若探测异常或结果为空（例如开发环境没有 ffmpeg），则保留默认全部选项。
-        try:
-            available_codecs = detect_available_encoders()
-            if available_codecs:
-                stream_card_module.set_available_codecs(available_codecs)
-                logger.info("可用编码器: {}", available_codecs)
-            else:
-                logger.warning("未探测到任何可用编码器，保留默认编码器选项")
-        except Exception:
-            logger.exception("编码器探测失败，回退使用全部编码器选项")
+        # 探测会拉起若干次 ffmpeg 子进程，可能耗时数百毫秒到数秒，
+        # 所以推迟到事件循环开始后执行；早于此时新建的卡片暂时使用默认全集，
+        # 探测完成后调用 :func:`stream_card.set_available_codecs` 影响后续新建卡片。
+        QTimer.singleShot(0, self._detect_and_apply_codecs)
 
         # 同步初始状态到 View
         self._window.set_server(self._rtsp_server)
@@ -152,6 +146,23 @@ class AppController(QObject):
 
     def _on_server_reconnect_max_attempts_changed(self, value: str):
         self._server_reconnect_max_attempts = self._parse_non_negative_int(value, 0)
+
+    def _detect_and_apply_codecs(self):
+        """启动后异步探测可用编码器并应用到 UI。
+
+        放到事件循环里执行，主窗口能先显示出来，避免「打开软件后立即推流
+        导致软件卡死一段时间」——探测过程中如果还有 ``auto_start`` 的通道
+        正在启动，至少 UI 是已经能响应的。
+        """
+        try:
+            available_codecs = detect_available_encoders()
+            if available_codecs:
+                stream_card_module.set_available_codecs(available_codecs)
+                logger.info("可用编码器: {}", available_codecs)
+            else:
+                logger.warning("未探测到任何可用编码器，保留默认编码器选项")
+        except Exception:
+            logger.exception("编码器探测失败，回退使用全部编码器选项")
 
     def _on_start_all(self):
         """全部开始推流。"""
@@ -502,12 +513,18 @@ class AppController(QObject):
         # 加载完成后刷新一次序号/移动按钮状态
         self._refresh_card_positions()
 
-        # 延迟启动，确保所有 UI 就绪
+        # 延迟启动，确保所有 UI 就绪；并按 ~250ms 间隔逐个启动而不是
+        # 一口气全部并发，避免：
+        #   1) 多路编码器同时初始化抢 GPU/CPU，
+        #   2) 主线程在循环里同步执行 ``probe_hikcamera_size`` / ``Popen``
+        #      等阻塞调用造成 UI 长时间卡死。
         if auto_start_ctrls:
-            QTimer.singleShot(
-                500,
-                lambda ctrls=auto_start_ctrls: [c.start_stream() for c in ctrls],
-            )
+            stagger_ms = 250
+            for i, c in enumerate(auto_start_ctrls):
+                QTimer.singleShot(
+                    500 + i * stagger_ms,
+                    lambda ctrl=c: ctrl.start_stream(),
+                )
 
     # ==================================================================
     #  系统托盘

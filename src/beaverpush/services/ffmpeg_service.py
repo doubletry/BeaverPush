@@ -713,6 +713,22 @@ def build_ffmpeg_command(
     if codec != "copy":
         cmd += ["-pix_fmt", "yuv420p"]
 
+    # WebRTC 兼容：NVENC / QSV 默认带 B 帧（``-bf -1`` auto），mediamtx 转
+    # WebRTC 后浏览器 H.264 实现不支持 B 帧会黑屏；同时 GOP 默认 250 太长，
+    # WebRTC 客户端等待首个 IDR 时间过久。这里强制：
+    #   * ``-bf 0``：禁用 B 帧
+    #   * ``-g <fps*2>``：把关键帧间隔压到 ~2 秒，确保 WebRTC 首帧及时
+    #   * h264_nvenc 额外加 ``-profile:v main``：对齐主流浏览器的支持子集
+    if codec in ("h264_nvenc", "hevc_nvenc", "h264_qsv", "hevc_qsv"):
+        try:
+            fps_int = int(round(float(framerate))) if framerate else 30
+        except (TypeError, ValueError):
+            fps_int = 30
+        gop = max(1, fps_int * 2)
+        cmd += ["-bf", "0", "-g", str(gop)]
+        if codec == "h264_nvenc":
+            cmd += ["-profile:v", "main"]
+
     cmd += ["-f", "rtsp", "-rtsp_transport", "tcp", rtsp_url]
     return cmd
 

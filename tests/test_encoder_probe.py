@@ -79,9 +79,10 @@ class TestProbeEncoder:
 
 class TestDetectAvailableEncoders:
     def test_only_software_when_no_hardware(self):
-        # 软件编码器在列表中，硬件编码器列表中存在但 _probe_encoder 失败
+        # 软件 + 硬件编码器都在 listing 中；硬件实际探测全部失败
+        all_listed = set(encoder_probe.SOFTWARE_ENCODERS) | set(encoder_probe.HARDWARE_ENCODERS)
         with mock.patch.object(
-            encoder_probe, "_ffmpeg_lists_encoder", return_value=True,
+            encoder_probe, "_list_ffmpeg_encoders", return_value=all_listed,
         ), mock.patch.object(
             encoder_probe, "_probe_encoder", return_value=False,
         ):
@@ -92,8 +93,9 @@ class TestDetectAvailableEncoders:
         assert "h264_qsv" not in result
 
     def test_includes_hardware_when_probe_succeeds(self):
+        all_listed = set(encoder_probe.SOFTWARE_ENCODERS) | set(encoder_probe.HARDWARE_ENCODERS)
         with mock.patch.object(
-            encoder_probe, "_ffmpeg_lists_encoder", return_value=True,
+            encoder_probe, "_list_ffmpeg_encoders", return_value=all_listed,
         ), mock.patch.object(
             encoder_probe, "_probe_encoder",
             side_effect=lambda name: name in ("h264_qsv", "hevc_qsv"),
@@ -107,10 +109,22 @@ class TestDetectAvailableEncoders:
     def test_skips_codec_not_in_ffmpeg_listing(self):
         listed = {"libx264"}  # 只有 libx264 在 -encoders 输出里
         with mock.patch.object(
-            encoder_probe, "_ffmpeg_lists_encoder",
-            side_effect=lambda name: name in listed,
+            encoder_probe, "_list_ffmpeg_encoders", return_value=listed,
         ), mock.patch.object(
             encoder_probe, "_probe_encoder", return_value=True,
         ):
             result = encoder_probe.detect_available_encoders()
         assert result == ["libx264"]
+
+    def test_listing_subprocess_called_only_once(self):
+        """关键性能保证：哪怕有 6 个候选编码器，也只能调用一次 ffmpeg -encoders。"""
+        all_listed = set(encoder_probe.SOFTWARE_ENCODERS) | set(encoder_probe.HARDWARE_ENCODERS)
+        list_mock = mock.MagicMock(return_value=all_listed)
+        with mock.patch.object(
+            encoder_probe, "_list_ffmpeg_encoders", list_mock,
+        ), mock.patch.object(
+            encoder_probe, "_probe_encoder", return_value=False,
+        ):
+            encoder_probe.detect_available_encoders()
+        assert list_mock.call_count == 1
+
