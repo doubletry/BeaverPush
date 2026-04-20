@@ -132,6 +132,14 @@ class TestProbeEncoder:
         ):
             assert encoder_probe._probe_encoder("h264_qsv") is False
 
+    def test_returncode_zero_but_mfx_session_create_error_means_unavailable(self):
+        bad_stderr = "[hevc_qsv @ 0000029d540c0440] Error creating a MFX session: -9.\n"
+        with mock.patch(
+            "beaverpush.services.encoder_probe.subprocess.run",
+            return_value=_fake_completed(returncode=0, stderr=bad_stderr),
+        ):
+            assert encoder_probe._probe_encoder("hevc_qsv") is False
+
 
 class TestDetectAvailableEncoders:
     def test_only_software_when_no_hardware(self):
@@ -183,4 +191,3 @@ class TestDetectAvailableEncoders:
         ):
             encoder_probe.detect_available_encoders()
         assert list_mock.call_count == 1
-

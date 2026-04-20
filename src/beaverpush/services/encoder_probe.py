@@ -111,6 +111,7 @@ def _probe_encoder(name: str, timeout: float = 8.0) -> bool:
         "cannot load",
         "no device available",
         "error initializing",
+        "error creating a mfx session",
     )
     if any(m in stderr_lower for m in bad_markers):
         return False
