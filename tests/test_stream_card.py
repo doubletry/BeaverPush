@@ -136,6 +136,61 @@ class TestSourcePathsCache:
             app.processEvents()
 
 
+class TestHikCameraSourceType:
+    """海康工业相机视频源 UI 行为"""
+
+    def test_hikcamera_option_present(self):
+        from beaverpush.views.stream_card import SOURCE_TYPES
+        keys = [key for key, _ in SOURCE_TYPES]
+        assert "hikcamera" in keys
+
+    def test_switch_to_hikcamera_shows_text_input_only(self):
+        app = QApplication.instance() or QApplication([])
+        card = StreamCardView(0)
+        try:
+            card.set_source_type("hikcamera")
+            app.processEvents()
+            assert card._current_source_type == "hikcamera"
+            assert not card._source_input.isHidden()
+            assert card._device_combo.isHidden()
+            assert card._browse_btn.isHidden()
+            assert card._refresh_btn.isHidden()
+            assert card._loop_check.isHidden()
+            assert "SN" in card._source_input.placeholderText()
+        finally:
+            card.deleteLater()
+            app.processEvents()
+
+    def test_reconnect_visible_for_hikcamera_source(self):
+        """重连配置对海康相机源应可见，与 RTSP 一致。"""
+        app = QApplication.instance() or QApplication([])
+        card = StreamCardView(0)
+        try:
+            card.set_source_type("hikcamera")
+            app.processEvents()
+            assert not card._reconnect_container.isHidden()
+        finally:
+            card.deleteLater()
+            app.processEvents()
+
+    def test_hikcamera_sn_cached_across_source_type_switch(self):
+        app = QApplication.instance() or QApplication([])
+        card = StreamCardView(0)
+        try:
+            card.set_source_type("hikcamera")
+            app.processEvents()
+            card._source_input.setText("00DA1234567")
+            card.set_source_type("video")
+            app.processEvents()
+            # 切回 hikcamera 应恢复之前输入的 SN
+            card.set_source_type("hikcamera")
+            app.processEvents()
+            assert card._source_input.text() == "00DA1234567"
+        finally:
+            card.deleteLater()
+            app.processEvents()
+
+
 class TestPositionBadge:
     """验证卡片左上角的序号徽标。"""
 

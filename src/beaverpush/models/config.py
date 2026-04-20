@@ -35,8 +35,8 @@ class StreamConfig:
 
     Attributes:
         name:         流名称，作为 RTSP URL 的最后一段路径
-        source_type:  视频源类型 (``"video"``/``"camera"``/``"rtsp"``/``"screen"``/``"window"``)
-        source_path:  视频文件路径 / 设备名 / RTSP URL / 屏幕偏移 / 窗口句柄
+        source_type:  视频源类型 (``"video"``/``"camera"``/``"rtsp"``/``"screen"``/``"window"``/``"hikcamera"``)
+        source_path:  视频文件路径 / 设备名 / RTSP URL / 屏幕偏移 / 窗口句柄 / 海康相机 SN
         rtsp_url:     完整的 RTSP 推流地址（由运行时拼接）
         loop:         是否循环播放（仅本地视频有效）
         preview:      是否启用 ffplay 预览
@@ -49,8 +49,8 @@ class StreamConfig:
     """
     name: str = ""
     title: str = ""             # 通道标题（可由用户自定义）
-    source_type: str = ""       # video / camera / rtsp / screen / window
-    source_path: str = ""       # 文件路径 / 设备名 / RTSP URL / 屏幕索引 / hwnd
+    source_type: str = ""       # video / camera / rtsp / screen / window / hikcamera
+    source_path: str = ""       # 文件路径 / 设备名 / RTSP URL / 屏幕索引 / hwnd / 海康相机 SN
     rtsp_url: str = ""
     loop: bool = False
     preview: bool = False

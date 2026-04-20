@@ -249,6 +249,10 @@ class StreamController(QObject):
                 self._set_state(StreamState.IDLE)
                 self._card.show_error("视频文件不存在，请检查路径")
                 return
+        if self._source_type == "hikcamera" and not self._source_path.strip():
+            self._set_state(StreamState.IDLE)
+            self._card.show_error("请输入海康相机 SN")
+            return
 
         if preflight:
             self._start_preflight_check(rtsp_server)
@@ -302,6 +306,31 @@ class StreamController(QObject):
         elif self._source_type == "camera":
             if not codec:
                 codec = "libx264"
+        elif self._source_type == "hikcamera":
+            if not codec:
+                codec = "libx264"
+            if not framerate:
+                framerate = "30"
+            # 通过 SDK 短暂打开相机抓一帧，确定真实 (W, H)。
+            # 海康相机的输出分辨率由相机自身参数决定，这里强制覆盖用户填写值，
+            # 以保证 FFmpeg ``-video_size`` 与实际写入 stdin 的字节数严格对齐。
+            try:
+                from ..services.hikcamera_capture import probe_hikcamera_size
+                pw, ph = probe_hikcamera_size(self._source_path)
+            except Exception as exc:
+                logger.warning(
+                    "海康相机首帧探测失败 ch={} sn={} err={}",
+                    self._channel_index, self._source_path, exc,
+                )
+                friendly = f"海康相机打开失败：{exc}"
+                self._last_error = friendly
+                # 走源失联重连流程；若用户未启用重连则恢复 IDLE 并提示
+                if not self._schedule_reconnect("source", friendly):
+                    self._set_state(StreamState.IDLE)
+                    self._card.show_error(friendly)
+                return
+            width = str(pw)
+            height = str(ph)
         elif self._source_type == "video":
             info = probe_video_info(self._source_path)
             if not codec and info.get("codec"):
@@ -353,6 +382,14 @@ class StreamController(QObject):
                 ow, oh = int(parts[2]), int(parts[3])
                 fps = int(framerate or "30")
                 self._worker.set_screen_capture(ox, oy, ow, oh, fps)
+        elif self._source_type == "hikcamera":
+            try:
+                hw = int(width)
+                hh = int(height)
+            except (TypeError, ValueError):
+                hw, hh = 0, 0
+            fps = int(framerate or "30")
+            self._worker.set_hik_capture(self._source_path, hw, hh, fps)
 
         self._worker.status_changed.connect(self._on_worker_status)
         self._worker.error_occurred.connect(self._on_worker_error)
@@ -589,7 +626,7 @@ class StreamController(QObject):
             # RTSP 输入断流时 FFmpeg 的报错文本分散，未知错误默认按源异常处理。
             return "source"
 
-        if self._source_type in ("camera", "screen", "window"):
+        if self._source_type in ("camera", "screen", "window", "hikcamera"):
             if any(k in lower for k in SERVER_ERROR_KEYWORDS):
                 return "server"
             return "source"
@@ -599,7 +636,7 @@ class StreamController(QObject):
     def _default_reconnect_reason_for_stop(self) -> str | None:
         if self._source_type == "rtsp":
             return "source"
-        if self._source_type in ("camera", "screen", "window"):
+        if self._source_type in ("camera", "screen", "window", "hikcamera"):
             return "source"
         return None
 

@@ -6,7 +6,7 @@ A multi-channel RTSP streaming desktop client built with **PySide6 + MVC archite
 
 ## Features
 
-- 🎥 **5 video source types:** local video files, cameras, RTSP pull-to-push, screen capture, window capture
+- 🎥 **6 video source types:** local video files, cameras, RTSP pull-to-push, screen capture, window capture, Hikvision industrial cameras
 - 📡 **Multi-channel streaming** with independent start/stop control per channel
 - 🔐 **v2 authenticated streaming:** supports window-to-web v2 username + API key authentication, three-level stream path `username/machine/channel`
 - 🎨 **Catppuccin Mocha** dark theme
@@ -19,7 +19,7 @@ A multi-channel RTSP streaming desktop client built with **PySide6 + MVC archite
 - 🖱️ **Editable channel names** with click-to-edit titles
 - 🔑 **Auto-detect machine name** using motherboard UUID
 - ✅ **Input validation** for username, machine name, and stream names (ASCII-safe characters only)
-- 🔄 **Auto-reconnect** with configurable interval for RTSP sources
+- 🔄 **Auto-reconnect** with configurable interval for RTSP sources and Hikvision industrial cameras
 - 💾 **Auto-save on successful connection test**
 
 ## Download
@@ -83,6 +83,7 @@ The stream path follows a three-level structure: `{username}/{machine}/{channel}
 | RTSP | Pull from an RTSP source and re-push |
 | Screen | Capture a display/monitor region |
 | Window | Capture a specific application window |
+| Hikvision Industrial Camera | Connect to a Hikvision industrial camera by serial number via the [hikcamera](https://github.com/doubletry/HiKCamera) library (requires the [Hikvision MVS SDK](https://www.hikrobotics.com/cn/machinevision/service/download/?module=0)). Frames are grabbed in BGR8 and piped to FFmpeg `rawvideo` for re-encoding (libx264 / libx265 / h264_nvenc / hevc_nvenc are all supported) and built-in disconnect/auto-reconnect (shares the RTSP reconnect settings) |
 
 ### Advanced Settings
 

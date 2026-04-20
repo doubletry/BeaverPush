@@ -827,6 +827,106 @@ class TestReconnectBehavior:
         assert ctrl._state == StreamState.IDLE
 
 
+class TestHikCameraSourceReconnect:
+    """海康工业相机源应接入现有的"源失联"重连机制。"""
+
+    def _make_ctrl(self, source_reconnect_max_attempts: int = 3):
+        card = _make_mock_card()
+        ctrl = StreamController(
+            card=card, channel_index=0,
+            rtsp_server_getter=lambda: "rtsp://localhost:8554",
+            username_getter=lambda: "alice",
+            machine_name_getter=lambda: "pc1",
+            auth_secret_getter=lambda: "secret",
+        )
+        ctrl._source_type = "hikcamera"
+        ctrl._source_path = "00DA1234567"
+        ctrl._stream_name = "s1"
+        ctrl._source_reconnect_interval = 1
+        ctrl._source_reconnect_max_attempts = source_reconnect_max_attempts
+        return ctrl, card
+
+    def test_classify_disconnect_returns_source(self):
+        ctrl, _ = self._make_ctrl()
+        assert ctrl._classify_reconnect_reason("海康相机断开：cable") == "source"
+
+    def test_classify_server_error_returns_server(self):
+        ctrl, _ = self._make_ctrl()
+        assert ctrl._classify_reconnect_reason("connection refused") == "server"
+
+    def test_default_reason_for_stop_is_source(self):
+        ctrl, _ = self._make_ctrl()
+        assert ctrl._default_reconnect_reason_for_stop() == "source"
+
+    def test_disconnect_schedules_source_reconnect(self):
+        ctrl, _ = self._make_ctrl()
+        scheduled = ctrl._schedule_reconnect("source", "海康相机断开：cable unplugged")
+        assert scheduled is True
+        assert ctrl._reconnect_timer.isActive()
+        assert ctrl._reconnect_reason == "source"
+        assert ctrl._state == StreamState.RECONNECTING
+        ctrl._reconnect_timer.stop()
+
+    def test_probe_failure_triggers_source_reconnect(self):
+        ctrl, card = self._make_ctrl()
+        with mock.patch(
+            "beaverpush.services.hikcamera_capture.probe_hikcamera_size",
+            side_effect=RuntimeError("打开海康相机失败：device not found"),
+        ):
+            ctrl._start_stream_impl(preflight=False)
+        # 重连计时器已启动，状态为 RECONNECTING；不应弹出 show_error
+        assert ctrl._reconnect_timer.isActive()
+        assert ctrl._state == StreamState.RECONNECTING
+        ctrl._reconnect_timer.stop()
+
+    def test_probe_failure_without_reconnect_shows_error(self):
+        # 把最大重试次数设为已达上限的值（这里用 -1 让 _should_stop_retrying 立即返回 True）
+        # 实际行为：_source_reconnect_max_attempts==0 表示不限重试 → 会安排；
+        # 因此用一个会立即拒绝的值：max_attempts=1, 已重试 1 次。
+        ctrl, card = self._make_ctrl(source_reconnect_max_attempts=1)
+        ctrl._source_retry_count = 1  # 模拟已用尽
+        with mock.patch(
+            "beaverpush.services.hikcamera_capture.probe_hikcamera_size",
+            side_effect=RuntimeError("打开海康相机失败：device not found"),
+        ):
+            ctrl._start_stream_impl(preflight=False)
+        card.show_error.assert_called()
+        assert ctrl._state == StreamState.IDLE
+
+
+class TestHikCameraStartStream:
+    """海康工业相机启动流程：探测尺寸→构造命令→启动 worker→设置 set_hik_capture。"""
+
+    def test_start_probes_size_and_configures_worker(self):
+        card = _make_mock_card()
+        ctrl = StreamController(
+            card=card, channel_index=0,
+            rtsp_server_getter=lambda: "rtsp://localhost:8554",
+            username_getter=lambda: "alice",
+            machine_name_getter=lambda: "pc1",
+            auth_secret_getter=lambda: "secret",
+        )
+        ctrl._source_type = "hikcamera"
+        ctrl._source_path = "SN42"
+        ctrl._stream_name = "s1"
+
+        with mock.patch(
+            "beaverpush.services.hikcamera_capture.probe_hikcamera_size",
+            return_value=(2592, 1944),
+        ), mock.patch(
+            "beaverpush.controllers.stream_controller.build_ffmpeg_command",
+            return_value=["ffmpeg", "-i", "pipe:0"],
+        ), mock.patch(
+            "beaverpush.controllers.stream_controller.FFmpegWorker"
+        ) as mock_worker_cls:
+            worker = mock_worker_cls.return_value
+            ctrl._start_stream_impl(preflight=False)
+
+        worker.set_hik_capture.assert_called_once_with("SN42", 2592, 1944, 30)
+        worker.set_source_type.assert_called_once_with("hikcamera")
+        worker.start.assert_called_once()
+
+
 class TestPreviewToggle:
     """验证预览按钮切换逻辑"""
 

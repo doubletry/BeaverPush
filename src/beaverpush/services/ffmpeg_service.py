@@ -15,6 +15,7 @@ FFmpeg 推流服务模块
     - ``rtsp``   : RTSP 拉流再推流
     - ``screen`` : GDI 屏幕捕获（按显示器区域）
     - ``window`` : Win32 窗口捕获（rawvideo 管道 + PrintWindow/BitBlt）
+    - ``hikcamera`` : Hikvision 工业相机（rawvideo 管道 + bgr24）
 
 架构::
 
@@ -39,6 +40,7 @@ from PySide6.QtCore import QThread, Signal
 
 from .ffmpeg_path import get_ffmpeg, get_ffplay
 from .window_capture import WindowCaptureFeeder, ScreenCaptureFeeder, get_window_rect
+from .hikcamera_capture import HikCameraFeeder
 from .log_service import logger
 
 # Windows-only subprocess flag; on Unix the attribute does not exist and falls back to 0.
@@ -140,6 +142,7 @@ class FFmpegWorker(QThread):
         self._preview_process: subprocess.Popen | None = None
         self._capture_feeder: WindowCaptureFeeder | None = None
         self._screen_feeder: ScreenCaptureFeeder | None = None
+        self._hik_feeder: HikCameraFeeder | None = None
         self._stop_flag = False
         self._cmd: list[str] = []
         self._preview_url: str = ""
@@ -151,6 +154,10 @@ class FFmpegWorker(QThread):
         self._screen_w: int = 0
         self._screen_h: int = 0
         self._screen_fps: int = 30
+        self._hik_sn: str = ""
+        self._hik_w: int = 0
+        self._hik_h: int = 0
+        self._hik_fps: int = 30
         self._preview_monitor_thread: threading.Thread | None = None
         self._streaming_announced = False
         self._source_type: str = "video"
@@ -182,6 +189,13 @@ class FFmpegWorker(QThread):
         self._screen_h = h
         self._screen_fps = fps
 
+    def set_hik_capture(self, sn: str, width: int, height: int, fps: int = 30):
+        """配置海康工业相机捕获参数（在 ``run()`` 之前调用）。"""
+        self._hik_sn = (sn or "").strip()
+        self._hik_w = int(width)
+        self._hik_h = int(height)
+        self._hik_fps = fps if fps > 0 else 30
+
     def start_preview_now(self, rtsp_url: str):
         """在推流过程中动态开启预览。"""
         self._preview_url = rtsp_url
@@ -201,7 +215,11 @@ class FFmpegWorker(QThread):
         logger.debug("FFmpeg 启动命令: {}", " ".join(self._cmd))
 
         try:
-            use_pipe = self._window_hwnd != 0 or self._screen_w != 0
+            use_pipe = (
+                self._window_hwnd != 0
+                or self._screen_w != 0
+                or bool(self._hik_sn)
+            )
 
             self._process = subprocess.Popen(
                 self._cmd,
@@ -225,6 +243,20 @@ class FFmpegWorker(QThread):
                     self._screen_fps,
                 )
                 self._screen_feeder.start(self._process)
+            elif use_pipe and self._hik_sn:
+                self._hik_feeder = HikCameraFeeder(
+                    self._hik_sn, self._hik_w, self._hik_h, self._hik_fps,
+                )
+                self._hik_feeder.set_error_callback(self.error_occurred.emit)
+                try:
+                    self._hik_feeder.start(self._process)
+                except Exception as exc:
+                    logger.exception("海康相机启动失败")
+                    self.error_occurred.emit(str(exc))
+                    try:
+                        self._process.terminate()
+                    except Exception:
+                        pass
 
             if self._preview_enabled and self._preview_url:
                 import time
@@ -287,6 +319,9 @@ class FFmpegWorker(QThread):
         if self._screen_feeder:
             self._screen_feeder.stop()
             self._screen_feeder = None
+        if self._hik_feeder:
+            self._hik_feeder.stop()
+            self._hik_feeder = None
         self._stop_preview()
         if self._process and self._process.poll() is None:
             try:
@@ -351,6 +386,9 @@ class FFmpegWorker(QThread):
         if self._screen_feeder:
             self._screen_feeder.stop()
             self._screen_feeder = None
+        if self._hik_feeder:
+            self._hik_feeder.stop()
+            self._hik_feeder = None
         self._stop_preview()
         if self._process:
             try:
@@ -483,7 +521,7 @@ def build_ffmpeg_command(
     """根据视频源类型构建完整的 FFmpeg 推流命令行。
 
     Args:
-        source_type: 视频源类型 (``"video"``/``"camera"``/``"rtsp"``/``"screen"``/``"window"``)
+        source_type: 视频源类型 (``"video"``/``"camera"``/``"rtsp"``/``"screen"``/``"window"``/``"hikcamera"``)
         source_path: 视频源路径。各类型的格式：
 
             - ``video``  : 文件绝对路径
@@ -491,6 +529,7 @@ def build_ffmpeg_command(
             - ``rtsp``   : RTSP 拉流 URL
             - ``screen`` : ``"offset:x,y,w,h"``（屏幕偏移与尺寸）
             - ``window`` : ``"hwnd:<句柄>"`` 或窗口标题
+            - ``hikcamera`` : 海康相机 SN（实际帧由 ``HikCameraFeeder`` 写入 stdin）
 
         rtsp_url:    RTSP 推流目标地址
         loop:        是否循环播放（仅 ``video`` 类型有效）
@@ -581,6 +620,27 @@ def build_ffmpeg_command(
             input_args += ["-i", f"title={source_path}"]
             cmd += input_args
 
+    elif source_type == "hikcamera":
+        # 海康工业相机：通过 HikCameraFeeder 把 BGR8 帧写入 stdin
+        # source_path 为相机 SN；宽高必须由控制器在调用前探测好
+        if not (width and height):
+            raise ValueError("海康相机源需要先探测画面尺寸")
+        try:
+            ow, oh = int(width), int(height)
+        except ValueError as exc:
+            raise ValueError("海康相机源宽高必须为整数") from exc
+        w = _make_even(ow)
+        h = _make_even(oh)
+        fps = framerate if framerate else "30"
+        cmd += [
+            "-use_wallclock_as_timestamps", "1",
+            "-f", "rawvideo",
+            "-pixel_format", "bgr24",
+            "-video_size", f"{w}x{h}",
+            "-framerate", fps,
+            "-i", "pipe:0",
+        ]
+
     else:
         raise ValueError(f"不支持的视频源类型: {source_type}")
 
@@ -588,11 +648,11 @@ def build_ffmpeg_command(
     filters = []
     codec = video_codec if video_codec else "libx264"
 
-    # copy 模式不能使用滤镜；管道源(screen/window)尺寸已在输入参数中指定
+    # copy 模式不能使用滤镜；管道源(screen/window/hikcamera)尺寸已在输入参数中指定
     need_scale = (
         width and height
         and codec != "copy"
-        and source_type not in ("screen", "window")
+        and source_type not in ("screen", "window", "hikcamera")
     )
     if need_scale:
         w_val = int(width) if width.isdigit() else width
@@ -604,7 +664,7 @@ def build_ffmpeg_command(
         filters.append(f"scale={w_val}:{h_val}")
 
     # ---- 编码 ----
-    if source_type in ("screen", "window", "camera"):
+    if source_type in ("screen", "window", "camera", "hikcamera"):
         codec = video_codec if video_codec else "libx264"
         cmd += ["-c:v", codec, "-preset", "ultrafast", "-tune", "zerolatency"]
     elif source_type == "rtsp":
@@ -626,7 +686,7 @@ def build_ffmpeg_command(
     if filters:
         cmd += ["-vf", ",".join(filters)]
 
-    if framerate and source_type not in ("camera", "screen", "window"):
+    if framerate and source_type not in ("camera", "screen", "window", "hikcamera"):
         cmd += ["-r", framerate]
 
     if bitrate:
@@ -664,6 +724,8 @@ def friendly_error(msg: str) -> str:
         ("invalid data", "无效的数据格式。"),
         ("error initializing output stream", "编码器初始化失败，建议宽高设为偶数。"),
         ("incorrect parameters", "编码参数不兼容。"),
+        ("海康相机断开", "海康相机已断开，等待重连。"),
+        ("海康相机", "海康相机异常，请检查相机连接和 MVS SDK。"),
     ]
     for keyword, friendly in mapping:
         if keyword in lower:

@@ -30,11 +30,12 @@ from .theme import Theme
 
 # ── 视频源类型常量（key → 显示文本）──
 SOURCE_TYPES: list[tuple[str, str]] = [
-    ("video",  "本地视频"),
-    ("camera", "本地摄像头"),
-    ("rtsp",   "RTSP 源"),
-    ("screen", "全屏画面"),
-    ("window", "应用窗口"),
+    ("video",     "本地视频"),
+    ("camera",    "本地摄像头"),
+    ("rtsp",      "RTSP 源"),
+    ("screen",    "全屏画面"),
+    ("window",    "应用窗口"),
+    ("hikcamera", "海康工业相机"),
 ]
 
 # ── 编码器选项 ──
@@ -524,27 +525,27 @@ class StreamCardView(QFrame):
     def _on_source_type_changed(self, idx: int):
         """源类型切换时更新 UI 可见性并发出信号。"""
         key = self._source_type_combo.itemData(idx)
-        is_file_or_rtsp = key in ("video", "rtsp")
+        is_text_input = key in ("video", "rtsp", "hikcamera")
         is_device = key in ("camera", "screen", "window")
 
         # 保存当前源类型的输入值（在切换前）
         prev_key = getattr(self, "_current_source_type", None)
-        if prev_key and prev_key in ("video", "rtsp"):
+        if prev_key and prev_key in ("video", "rtsp", "hikcamera"):
             self._source_paths_cache[prev_key] = self._source_input.text()
 
         # 切换输入 / 设备下拉框
-        self._source_input.setVisible(is_file_or_rtsp)
+        self._source_input.setVisible(is_text_input)
         self._device_combo.setVisible(is_device)
         self._browse_btn.setVisible(key == "video")
         self._refresh_btn.setVisible(is_device)
         self._loop_check.setVisible(key == "video")
 
-        # 重连配置仅对 RTSP 视频源有效
-        self._reconnect_container.setVisible(key == "rtsp")
+        # 重连配置对 RTSP 源 和 海康相机 都有效（断线后会按相同机制重连）
+        self._reconnect_container.setVisible(key in ("rtsp", "hikcamera"))
 
         # 恢复之前保存的源路径（而不是清空）
         self._source_input.blockSignals(True)
-        if key in ("video", "rtsp"):
+        if is_text_input:
             cached = self._source_paths_cache.get(key, "")
             self._source_input.setText(cached)
         else:
@@ -559,6 +560,8 @@ class StreamCardView(QFrame):
             self._source_input.setPlaceholderText("视频文件路径")
         elif key == "rtsp":
             self._source_input.setPlaceholderText("RTSP 地址")
+        elif key == "hikcamera":
+            self._source_input.setPlaceholderText("海康相机 SN，例如：00DA1234567")
 
         self._current_source_type = key
         self.source_type_changed.emit(key)

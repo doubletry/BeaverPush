@@ -223,6 +223,112 @@ class TestBuildFfmpegCommandUnsupported:
             )
 
 
+class TestBuildFfmpegCommandHikCamera:
+    """海康工业相机使用 rawvideo 管道 + bgr24"""
+
+    def test_hikcamera_uses_rawvideo_bgr24_pipe(self):
+        cmd = build_ffmpeg_command(
+            source_type="hikcamera",
+            source_path="00DA1234567",
+            rtsp_url="rtsp://localhost:8554/c/s",
+            width="1920",
+            height="1080",
+            framerate="25",
+        )
+        # 输入端
+        f_idx = cmd.index("-f")
+        assert cmd[f_idx + 1] == "rawvideo"
+        pf_idx = cmd.index("-pixel_format")
+        assert cmd[pf_idx + 1] == "bgr24"
+        vs_idx = cmd.index("-video_size")
+        assert cmd[vs_idx + 1] == "1920x1080"
+        assert "pipe:0" in cmd
+        # 输入帧率应来自参数；不应同时再追加 -r 出现两次帧率
+        fr_count = cmd.count("-framerate")
+        assert fr_count == 1
+        assert cmd[cmd.index("-framerate") + 1] == "25"
+        assert "-r" not in cmd
+
+    def test_hikcamera_dimensions_are_even(self):
+        cmd = build_ffmpeg_command(
+            source_type="hikcamera",
+            source_path="SN001",
+            rtsp_url="rtsp://localhost:8554/c/s",
+            width="1281",
+            height="721",
+        )
+        vs_idx = cmd.index("-video_size")
+        assert cmd[vs_idx + 1] == "1282x722"
+
+    def test_hikcamera_default_framerate(self):
+        cmd = build_ffmpeg_command(
+            source_type="hikcamera",
+            source_path="SN001",
+            rtsp_url="rtsp://localhost:8554/c/s",
+            width="1920",
+            height="1080",
+        )
+        assert cmd[cmd.index("-framerate") + 1] == "30"
+
+    def test_hikcamera_requires_dimensions(self):
+        import pytest
+        with pytest.raises(ValueError):
+            build_ffmpeg_command(
+                source_type="hikcamera",
+                source_path="SN001",
+                rtsp_url="rtsp://localhost:8554/c/s",
+            )
+
+    def test_hikcamera_default_codec_libx264_with_low_latency(self):
+        cmd = build_ffmpeg_command(
+            source_type="hikcamera",
+            source_path="SN001",
+            rtsp_url="rtsp://localhost:8554/c/s",
+            width="1920",
+            height="1080",
+        )
+        cv_idx = cmd.index("-c:v")
+        assert cmd[cv_idx + 1] == "libx264"
+        assert "ultrafast" in cmd
+        assert "zerolatency" in cmd
+
+    def test_hikcamera_custom_hardware_codec(self):
+        """硬件加速编码器应被原样透传。"""
+        for codec in ("libx265", "h264_nvenc", "hevc_nvenc"):
+            cmd = build_ffmpeg_command(
+                source_type="hikcamera",
+                source_path="SN001",
+                rtsp_url="rtsp://localhost:8554/c/s",
+                video_codec=codec,
+                width="1920",
+                height="1080",
+            )
+            cv_idx = cmd.index("-c:v")
+            assert cmd[cv_idx + 1] == codec, codec
+
+    def test_hikcamera_no_scale_filter_when_size_set(self):
+        """hikcamera 输入尺寸已固定，不应额外插入 scale 滤镜。"""
+        cmd = build_ffmpeg_command(
+            source_type="hikcamera",
+            source_path="SN001",
+            rtsp_url="rtsp://localhost:8554/c/s",
+            width="1920",
+            height="1080",
+        )
+        assert "-vf" not in cmd
+
+    def test_hikcamera_uses_wallclock_timestamps(self):
+        cmd = build_ffmpeg_command(
+            source_type="hikcamera",
+            source_path="SN001",
+            rtsp_url="rtsp://localhost:8554/c/s",
+            width="640",
+            height="480",
+        )
+        idx = cmd.index("-use_wallclock_as_timestamps")
+        assert cmd[idx + 1] == "1"
+
+
 class TestBuildFfmpegCommandScreenNoFilter:
     """screen/window 管道源不应产生 scale 滤镜"""
 
@@ -309,6 +415,21 @@ class TestFFmpegWorkerInit:
         worker = FFmpegWorker()
         worker.set_window_capture(12345, 30)
         assert worker._window_hwnd == 12345
+
+    def test_has_hik_capture_method(self):
+        worker = FFmpegWorker()
+        assert hasattr(worker, "set_hik_capture")
+        worker.set_hik_capture("00DA1234567", 1920, 1080, 25)
+        assert worker._hik_sn == "00DA1234567"
+        assert worker._hik_w == 1920
+        assert worker._hik_h == 1080
+        assert worker._hik_fps == 25
+
+    def test_hik_capture_strips_sn_and_defaults_fps(self):
+        worker = FFmpegWorker()
+        worker.set_hik_capture("  SN001  ", 640, 480, 0)
+        assert worker._hik_sn == "SN001"
+        assert worker._hik_fps == 30
 
     def test_start_preview_now_sets_state(self):
         worker = FFmpegWorker()

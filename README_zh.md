@@ -6,7 +6,7 @@
 
 ## 功能特性
 
-- 🎥 **5 种视频源：** 本地视频、摄像头、RTSP 拉流转推、屏幕捕获、窗口捕获
+- 🎥 **6 种视频源：** 本地视频、摄像头、RTSP 拉流转推、屏幕捕获、窗口捕获、海康工业相机
 - 📡 **多路同时推流**，每路独立控制启停
 - 🔐 **v2 认证推流：** 支持 window-to-web v2 的用户名 + 授权码认证，推流路径为 `用户名/设备名/通道名` 三级结构
 - 🎨 **Catppuccin Mocha** 暗色主题
@@ -19,7 +19,7 @@
 - 🖱️ **可编辑通道名称**，点击标题即可修改
 - 🔑 **自动检测设备名**，使用主板 UUID
 - ✅ **输入校验**，用户名、设备名和流名称仅允许 ASCII 安全字符
-- 🔄 **自动重连**，RTSP 源支持可配置的重连间隔
+- 🔄 **自动重连**，RTSP 源、海康相机源支持可配置的重连间隔与最大重试次数
 - 💾 **连接测试成功后自动保存配置**
 
 ## 下载安装
@@ -83,6 +83,7 @@ uv run pytest
 | RTSP 拉流 | 从 RTSP 源拉流并转推 |
 | 屏幕捕获 | 捕获显示器/屏幕区域 |
 | 窗口捕获 | 捕获指定应用程序窗口 |
+| 海康工业相机 | 通过 [hikcamera](https://github.com/doubletry/HiKCamera) 库以 SN 自动连接 Hikvision 工业相机（需另行安装 [Hikvision MVS SDK](https://www.hikrobotics.com/cn/machinevision/service/download/?module=0)），BGR8 取帧后通过 FFmpeg rawvideo 管道编码并推流；支持 libx264 / libx265 / h264_nvenc / hevc_nvenc 等编码器，自带断线重连（与 RTSP 重连配置共用） |
 
 ### 高级设置
 
