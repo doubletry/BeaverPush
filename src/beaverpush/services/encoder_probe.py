@@ -194,6 +194,12 @@ def _probe_encoder(name: str, timeout: float = 8.0) -> bool:
     强制 FFmpeg 创建对应的硬件会话——若机器上没有 Intel iGPU 或
     NVIDIA GPU，对应的 device init 会失败，进程返回非零，从而避免出现
     "ffmpeg 内置了 QSV 但用户机器只有 N 卡也被探测为可用" 的误报。
+
+    注意 ``-pix_fmt yuv420p`` 是必须的：``testsrc`` 默认输出 ``rgb24`` →
+    libavfilter 自动 negotiate 成 ``gbrp``，会让 NVENC 走 ``High 4:4:4``
+    profile。这个 profile 在部分驱动/显卡组合下不被支持（或与并发会话冲突），
+    导致探测失败而误判 ``h264_nvenc`` 不可用；而真正推流时我们用的是
+    ``yuv420p`` 是受支持的，所以这里强制对齐成 ``yuv420p`` 才能反映真实可用性。
     """
     cmd = [get_ffmpeg(), "-hide_banner", "-y"]
     # 硬件初始化前置：不存在对应硬件时 ffmpeg 会直接退出非 0
@@ -205,6 +211,7 @@ def _probe_encoder(name: str, timeout: float = 8.0) -> bool:
         "-f", "lavfi",
         "-i", "testsrc=duration=1:size=320x240:rate=1",
         "-frames:v", "1",
+        "-pix_fmt", "yuv420p",
         "-c:v", name,
         "-f", "null", "-",
     ]
@@ -279,6 +286,23 @@ def detect_available_encoders() -> list[str]:
                 continue
             filtered.append(name)
         hw_candidates = filtered
+
+    # NVENC 没有"软回退"问题（不像 libmfx 在没有 Intel iGPU 时会假装成功），
+    # 因此当 OS 层已经确认 NVIDIA GPU 在场、且 ffmpeg 也注册了 nvenc 时，
+    # 直接信任并跳过实跑探测——后者依赖具体驱动状态/并发 NVENC 会话数，
+    # 容易产生假阴性（例如 testsrc 触发 High 4:4:4 profile，或瞬时会话占满），
+    # 让用户看不到本机本应可用的 nvenc 选项。
+    nvenc_trusted: set[str] = set()
+    if vendors is not None and "nvidia" in vendors:
+        for name in list(hw_candidates):
+            if name.endswith("_nvenc"):
+                nvenc_trusted.add(name)
+                hw_candidates.remove(name)
+                available.append(name)
+                logger.info(
+                    "检测到 NVIDIA GPU 且 FFmpeg 已注册 {}，信任厂商检测，"
+                    "跳过实跑探测", name,
+                )
 
     if hw_candidates:
         with ThreadPoolExecutor(max_workers=len(hw_candidates)) as ex:
