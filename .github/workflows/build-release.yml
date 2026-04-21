@@ -76,6 +76,7 @@ jobs:
 
           $versionLine = (& "$($binDir.FullName)\ffmpeg.exe" -version | Select-Object -First 1).Trim()
           Write-Host "Detected FFmpeg version: $versionLine"
+          # 上游构建的归档名使用 8.1，而 ffmpeg -version 的输出可能带 n 前缀（如 n8.1）
           if ($versionLine -notmatch "^ffmpeg version (?:n)?$escapedFfmpegVersion(?:[\s-]|$)") {
             Write-Error "Unexpected FFmpeg version. Expected $ffmpegVersion, got: $versionLine"
             exit 1
