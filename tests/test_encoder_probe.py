@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import os
+import tempfile
 from unittest import mock
 
 from beaverpush.services import encoder_probe
@@ -126,7 +127,7 @@ class TestProbeEncoder:
         文件输入路径。
         """
         captured = {}
-        probe_path = "/tmp/fake-qsv-probe.y4m"
+        probe_path = os.path.join(tempfile.gettempdir(), "fake-qsv-probe.y4m")
 
         def fake_run(cmd, **kwargs):
             captured["cmd"] = list(cmd)

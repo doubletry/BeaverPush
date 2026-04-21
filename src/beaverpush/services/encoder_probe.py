@@ -33,6 +33,7 @@ import sys
 import tempfile
 from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor
+from typing import Generator
 
 from .ffmpeg_path import get_ffmpeg
 from .log_service import logger
@@ -278,7 +279,7 @@ def _create_qsv_probe_video() -> str:
 
 
 @contextmanager
-def _probe_source_args(name: str):
+def _probe_source_args(name: str) -> Generator[list[str], None, None]:
     """返回探测该编码器时使用的输入源参数。
 
     QSV：使用临时视频文件输入，贴近用户实际的 ``ffmpeg -i input.mp4``
@@ -296,12 +297,12 @@ def _probe_source_args(name: str):
                 os.unlink(path)
             except FileNotFoundError:
                 pass
-        return
-    yield [
-        "-f", "lavfi",
-        "-i", "testsrc=duration=1:size=320x240:rate=1",
-        "-pix_fmt", "yuv420p",
-    ]
+    else:
+        yield [
+            "-f", "lavfi",
+            "-i", "testsrc=duration=1:size=320x240:rate=1",
+            "-pix_fmt", "yuv420p",
+        ]
 
 
 def _probe_encoder(
