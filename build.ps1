@@ -56,7 +56,7 @@ if ([string]::IsNullOrWhiteSpace($Version)) {
     $Version = Get-ProjectVersion -Path $PyprojectPath
 }
 $WindowsVersion = Convert-ToWindowsVersion -RawVersion $Version
-$GeneratedVersionFile = Join-Path ([System.IO.Path]::GetTempPath()) "beaverpush-version.txt"
+$GeneratedVersionFile = (New-TemporaryFile).FullName
 Set-Content -Path $GeneratedVersionFile -Value $Version -Encoding utf8
 
 try {

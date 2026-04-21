@@ -573,11 +573,12 @@ class AppController(QObject):
         """收集当前可启动的通道，保持原有顺序并去重。"""
         startable: list[StreamController] = []
         seen_ids: set[int] = set()
+        controller_ids = {id(ctrl) for ctrl in self._controllers}
         for ctrl in controllers:
             if id(ctrl) in seen_ids:
                 continue
             seen_ids.add(id(ctrl))
-            if ctrl not in self._controllers or ctrl.is_streaming:
+            if id(ctrl) not in controller_ids or ctrl.is_streaming:
                 continue
             startable.append(ctrl)
         return startable

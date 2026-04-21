@@ -95,6 +95,18 @@ def test_help_content_includes_runtime_version(monkeypatch):
         app.processEvents()
 
 
+def test_load_help_content_reads_help_file(monkeypatch, tmp_path):
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    try:
+        monkeypatch.setattr(main_window_module, "_ASSETS_DIR", tmp_path)
+        (tmp_path / "help.txt").write_text("文件中的帮助正文", encoding="utf-8")
+        assert window._load_help_content() == "文件中的帮助正文"
+    finally:
+        window.deleteLater()
+        app.processEvents()
+
+
 def test_help_content_shows_version_when_file_missing(monkeypatch, tmp_path):
     app = QApplication.instance() or QApplication([])
     window = MainWindow()
