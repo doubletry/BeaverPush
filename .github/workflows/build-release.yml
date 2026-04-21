@@ -45,6 +45,11 @@ jobs:
           $ffmpegUrl = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/$ffmpegAssetName"
           $zipPath = "$env:RUNNER_TEMP\ffmpeg.zip"
           $extractPath = "$env:RUNNER_TEMP\ffmpeg-extract"
+          $escapedFfmpegVersion = [regex]::Escape($ffmpegVersion)
+
+          if (Test-Path "ffmpeg") {
+            Remove-Item "ffmpeg" -Recurse -Force
+          }
 
           Write-Host "Downloading FFmpeg $ffmpegVersion (shared build)..."
           Write-Host "Source URL: $ffmpegUrl"
@@ -69,7 +74,7 @@ jobs:
 
           $versionLine = (& "$($binDir.FullName)\ffmpeg.exe" -version | Select-Object -First 1).Trim()
           Write-Host "Detected FFmpeg version: $versionLine"
-          if ($versionLine -notmatch '^ffmpeg version n8\.1(?:[\s-]|$)') {
+          if ($versionLine -notmatch "^ffmpeg version $escapedFfmpegVersion(?:[\s-]|$)") {
             Write-Error "Unexpected FFmpeg version. Expected n8.1, got: $versionLine"
             exit 1
           }
@@ -89,9 +94,6 @@ jobs:
           }
 
           # Copy ffmpeg executables and shared libraries to project ffmpeg/ directory
-          if (Test-Path "ffmpeg") {
-            Remove-Item "ffmpeg" -Recurse -Force
-          }
           New-Item -ItemType Directory -Path "ffmpeg" -Force | Out-Null
           Copy-Item "$($binDir.FullName)\ffmpeg.exe" -Destination "ffmpeg\ffmpeg.exe"
           Copy-Item "$($binDir.FullName)\ffplay.exe" -Destination "ffmpeg\ffplay.exe"
