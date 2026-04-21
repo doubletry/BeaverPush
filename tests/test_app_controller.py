@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QApplication
 from beaverpush.controllers import app_controller as app_ctrl_module
 from beaverpush.controllers.app_controller import AppController
 from beaverpush.models.config import AppConfig
+from beaverpush.models.stream_model import StreamState
 from beaverpush.views.main_window import MainWindow
 
 
@@ -219,5 +220,104 @@ def test_async_codec_probe_refreshes_cards_created_before_probe(monkeypatch):
         assert stream.card.get_codec() == "自动"
     finally:
         sc.CODEC_OPTIONS = original
+        window.deleteLater()
+        app.processEvents()
+
+
+def test_start_all_queues_staggered_starts(controller, monkeypatch):
+    ctrl, window, saves = controller
+    a = ctrl.add_stream()
+    b = ctrl.add_stream()
+    c = ctrl.add_stream()
+    calls: list[str] = []
+
+    monkeypatch.setattr(app_ctrl_module, "BULK_START_INTERVAL_MS", 10)
+
+    def make_start(name, stream_ctrl):
+        def _start():
+            calls.append(name)
+            stream_ctrl._state = StreamState.STARTING
+        return _start
+
+    monkeypatch.setattr(a, "start_stream", make_start("a", a))
+    monkeypatch.setattr(b, "start_stream", make_start("b", b))
+    monkeypatch.setattr(c, "start_stream", make_start("c", c))
+
+    ctrl._on_start_all()
+    assert calls == []
+
+    app = QApplication.instance() or QApplication([])
+    deadline = time.time() + 1.0
+    while time.time() < deadline and calls != ["a", "b", "c"]:
+        app.processEvents()
+        time.sleep(0.01)
+
+    assert calls == ["a", "b", "c"]
+
+
+def test_start_all_skips_streaming_and_stop_all_cancels_remaining(controller, monkeypatch):
+    ctrl, window, saves = controller
+    a = ctrl.add_stream()
+    b = ctrl.add_stream()
+    c = ctrl.add_stream()
+    b._state = StreamState.STREAMING
+    calls: list[str] = []
+
+    monkeypatch.setattr(app_ctrl_module, "BULK_START_INTERVAL_MS", 120)
+
+    def make_start(name, stream_ctrl):
+        def _start():
+            calls.append(name)
+            stream_ctrl._state = StreamState.STARTING
+        return _start
+
+    monkeypatch.setattr(a, "start_stream", make_start("a", a))
+    monkeypatch.setattr(c, "start_stream", make_start("c", c))
+    monkeypatch.setattr(a, "stop_stream", lambda: calls.append("stop-a"))
+
+    ctrl._on_start_all()
+
+    app = QApplication.instance() or QApplication([])
+    deadline = time.time() + 0.5
+    while time.time() < deadline and calls != ["a"]:
+        app.processEvents()
+        time.sleep(0.01)
+
+    assert calls == ["a"]
+
+    ctrl._on_stop_all()
+
+    deadline = time.time() + 0.4
+    while time.time() < deadline:
+        app.processEvents()
+        time.sleep(0.01)
+
+    assert calls == ["a", "stop-a"]
+
+
+def test_loading_config_uses_bulk_start_queue(monkeypatch):
+    """自动恢复推流应与手动“全部开始”共用同一批量调度入口。"""
+    cfg = AppConfig(
+        streams=[{"name": "stream1", "source_type": "video", "auto_start": True}]
+    )
+    monkeypatch.setattr(app_ctrl_module, "load_config", lambda: cfg)
+    monkeypatch.setattr(app_ctrl_module, "save_config", lambda c: None)
+    monkeypatch.setattr(AppController, "_detect_and_apply_codecs", lambda self: None)
+
+    queued: dict[str, object] = {}
+
+    def fake_queue(self, controllers, *, initial_delay_ms):
+        queued["count"] = len(controllers)
+        queued["delay"] = initial_delay_ms
+        return len(controllers)
+
+    monkeypatch.setattr(AppController, "_queue_bulk_start", fake_queue)
+
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    try:
+        AppController(window, app)
+        assert queued == {"count": 1, "delay": app_ctrl_module.AUTO_BULK_START_INITIAL_DELAY_MS}
+    finally:
         window.deleteLater()
         app.processEvents()

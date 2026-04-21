@@ -1,7 +1,6 @@
 BeaverPush - 河狸推流
 ====================
 
-版本: 1.0.0
 作者: Your Name
 邮箱: your@email.com
 网站: https://example.com

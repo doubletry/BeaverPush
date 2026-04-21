@@ -4,8 +4,11 @@ import os
 import sys
 from pathlib import Path
 
+from ._version import get_app_version
+
 # 应用名称（窗口标题、托盘提示、应用名兼用）
 APP_NAME = "BeaverPush - 河狸推流"
+APP_VERSION = get_app_version()
 
 
 def _get_assets_dir() -> Path:

@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 from .stream_card import StreamCardView
 from .theme import Theme
 from .. import APP_NAME, ASSETS_DIR
+from .._version import get_app_version
 
 _ASSETS_DIR = ASSETS_DIR
 
@@ -406,11 +407,7 @@ class MainWindow(QMainWindow):
 
     def _show_help(self):
         """加载 assets/help.txt 并显示帮助对话框。"""
-        help_file = _ASSETS_DIR / "help.txt"
-        try:
-            content = help_file.read_text(encoding="utf-8")
-        except FileNotFoundError:
-            content = "帮助文件未找到。"
+        content = self._build_help_content()
 
         dlg = QDialog(self)
         dlg.setWindowTitle("帮助")
@@ -424,6 +421,19 @@ class MainWindow(QMainWindow):
         close_btn.clicked.connect(dlg.accept)
         layout.addWidget(close_btn)
         dlg.exec()
+
+    def _load_help_content(self) -> str:
+        """读取帮助正文。"""
+        help_file = _ASSETS_DIR / "help.txt"
+        try:
+            return help_file.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return "帮助文件未找到。"
+
+    def _build_help_content(self, body: str | None = None) -> str:
+        """构建帮助弹窗内容，并在顶部显示当前版本。"""
+        content = self._load_help_content() if body is None else body
+        return f"当前版本: {get_app_version()}\n\n{content}".strip()
 
     def set_server_locked(self, locked: bool):
         """设置全局配置的锁定状态。

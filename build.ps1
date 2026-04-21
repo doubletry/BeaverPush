@@ -14,13 +14,49 @@
 #>
 
 param(
-    [string]$Version = "0.1.0"
+    [string]$Version = ""
 )
 
 $ErrorActionPreference = "Stop"
 
 # ── 项目根目录（脚本所在位置）──
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$PyprojectPath = Join-Path $ProjectRoot "pyproject.toml"
+
+function Get-ProjectVersion {
+    param([string]$Path)
+
+    $match = Select-String -Path $Path -Pattern '^\s*version\s*=\s*"([^"]+)"' | Select-Object -First 1
+    if (-not $match) {
+        throw "未能从 pyproject.toml 读取版本号: $Path"
+    }
+    return $match.Matches[0].Groups[1].Value
+}
+
+function Convert-ToWindowsVersion {
+    param([string]$RawVersion)
+
+    $parts = $RawVersion.Split(".")
+    if ($parts.Count -gt 4) {
+        throw "版本号段数过多，无法转换为 Windows 四段版本: $RawVersion"
+    }
+    foreach ($part in $parts) {
+        if ($part -notmatch '^\d+$') {
+            throw "版本号包含非数字字段，无法转换为 Windows 四段版本: $RawVersion"
+        }
+    }
+    while ($parts.Count -lt 4) {
+        $parts += "0"
+    }
+    return ($parts -join ".")
+}
+
+if ([string]::IsNullOrWhiteSpace($Version)) {
+    $Version = Get-ProjectVersion -Path $PyprojectPath
+}
+$WindowsVersion = Convert-ToWindowsVersion -RawVersion $Version
+$GeneratedVersionFile = Join-Path ([System.IO.Path]::GetTempPath()) "beaverpush-version.txt"
+Set-Content -Path $GeneratedVersionFile -Value $Version -Encoding utf8
 
 # ── 基本 参数 ──
 $EntryPoint    = Join-Path $ProjectRoot "src\beaverpush\main.py"
@@ -39,6 +75,7 @@ $NuitkaArgs = @(
     "--product-version=$Version"
     "--output-dir=$OutputDir"
     "--include-data-dir=$ProjectRoot\assets=assets"
+    "--include-data-file=$GeneratedVersionFile=assets/version.txt"
 )
 
 # 如果有 .ico 图标则添加
@@ -56,6 +93,7 @@ Write-Host "[INFO] 入口文件:  $EntryPoint"
 Write-Host "[INFO] 输出目录:  $OutputDir"
 Write-Host "[INFO] 产品名称:  $ProductName"
 Write-Host "[INFO] 版本号:    $Version"
+Write-Host "[INFO] 安装器版本: $WindowsVersion"
 Write-Host ""
 
 # ── 执行编译 ──
@@ -111,7 +149,7 @@ Write-Host "[INFO] ISCC: $Iscc"
 Write-Host "[INFO] ISS:  $IssFile"
 Write-Host ""
 
-& $Iscc $IssFile
+& $Iscc "/DMySourceDir=$ProjectRoot" "/DMyAppVersion=$Version" "/DMyAppVersionInfoVersion=$WindowsVersion" $IssFile
 
 if ($LASTEXITCODE -eq 0) {
     Write-Host ""
