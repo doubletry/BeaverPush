@@ -604,28 +604,27 @@ class AppController(QObject):
 
     def _start_next_queued_stream(self):
         """启动队列中的下一路推流。"""
-        while True:
-            self._bulk_start_queue = self._collect_startable_controllers(
-                self._bulk_start_queue
-            )
-            if not self._bulk_start_queue:
-                self._finish_bulk_start()
-                return
-            self._bulk_start_total = self._bulk_start_started + len(self._bulk_start_queue)
-            ctrl = self._bulk_start_queue.pop(0)
-
-            current = self._bulk_start_started + 1
-            self._window.set_status(
-                f"批量启动中：正在启动第 {current}/{self._bulk_start_total} 路"
-            )
-            ctrl.start_stream()
-            self._bulk_start_started += 1
-
-            if self._bulk_start_queue:
-                self._bulk_start_timer.start(BULK_START_INTERVAL_MS)
-            else:
-                self._finish_bulk_start()
+        self._bulk_start_queue = self._collect_startable_controllers(
+            self._bulk_start_queue
+        )
+        if not self._bulk_start_queue:
+            self._finish_bulk_start()
             return
+
+        self._bulk_start_total = self._bulk_start_started + len(self._bulk_start_queue)
+        ctrl = self._bulk_start_queue.pop(0)
+
+        current = self._bulk_start_started + 1
+        self._window.set_status(
+            f"批量启动中：正在启动第 {current}/{self._bulk_start_total} 路"
+        )
+        ctrl.start_stream()
+        self._bulk_start_started += 1
+
+        if self._bulk_start_queue:
+            self._bulk_start_timer.start(BULK_START_INTERVAL_MS)
+        else:
+            self._finish_bulk_start()
 
     def _finish_bulk_start(self):
         """结束批量启动流程。"""
