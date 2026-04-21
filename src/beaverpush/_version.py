@@ -14,9 +14,13 @@ _FALLBACK_VERSION = "0.1.0"
 
 def _get_assets_dir() -> Path:
     """解析 assets 目录，兼容开发模式与打包产物。"""
-    exe_assets = Path(os.path.dirname(os.path.abspath(sys.argv[0]))) / "assets"
-    if exe_assets.is_dir():
-        return exe_assets
+    candidates = [
+        Path(os.path.dirname(os.path.abspath(sys.executable))) / "assets",
+        Path(os.path.dirname(os.path.abspath(sys.argv[0]))) / "assets",
+    ]
+    for candidate in candidates:
+        if candidate.is_dir():
+            return candidate
     return Path(__file__).resolve().parents[2] / "assets"
 
 

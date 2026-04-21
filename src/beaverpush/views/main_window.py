@@ -407,7 +407,7 @@ class MainWindow(QMainWindow):
 
     def _show_help(self):
         """加载 assets/help.txt 并显示帮助对话框。"""
-        content = self._build_help_content()
+        content = self._get_help_content()
 
         dlg = QDialog(self)
         dlg.setWindowTitle("帮助")
@@ -430,9 +430,9 @@ class MainWindow(QMainWindow):
         except FileNotFoundError:
             return "帮助文件未找到。"
 
-    def _build_help_content(self, body: str | None = None) -> str:
+    def _get_help_content(self) -> str:
         """构建帮助弹窗内容，并在顶部显示当前版本。"""
-        content = self._load_help_content() if body is None else body
+        content = self._load_help_content()
         return f"当前版本: {get_app_version()}\n\n{content}".strip()
 
     def set_server_locked(self, locked: bool):

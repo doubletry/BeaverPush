@@ -604,11 +604,15 @@ class AppController(QObject):
 
     def _start_next_queued_stream(self):
         """启动队列中的下一路推流。"""
-        while self._bulk_start_queue:
+        while True:
+            self._bulk_start_queue = self._collect_startable_controllers(
+                self._bulk_start_queue
+            )
+            if not self._bulk_start_queue:
+                self._finish_bulk_start()
+                return
+            self._bulk_start_total = self._bulk_start_started + len(self._bulk_start_queue)
             ctrl = self._bulk_start_queue.pop(0)
-            if ctrl not in self._controllers or ctrl.is_streaming:
-                self._bulk_start_total = max(0, self._bulk_start_total - 1)
-                continue
 
             current = self._bulk_start_started + 1
             self._window.set_status(
@@ -622,8 +626,6 @@ class AppController(QObject):
             else:
                 self._finish_bulk_start()
             return
-
-        self._finish_bulk_start()
 
     def _finish_bulk_start(self):
         """结束批量启动流程。"""

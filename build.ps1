@@ -36,7 +36,8 @@ function Get-ProjectVersion {
 function Convert-ToWindowsVersion {
     param([string]$RawVersion)
 
-    $parts = $RawVersion.Split(".")
+    $normalized = $RawVersion.Trim() -replace '[-+].*$', ''
+    $parts = $normalized.Split(".")
     if ($parts.Count -gt 4) {
         throw "版本号段数过多，无法转换为 Windows 四段版本: $RawVersion"
     }
@@ -72,7 +73,7 @@ $NuitkaArgs = @(
     "--windows-console-mode=disable"
     "--windows-product-name=$ProductName"
     "--output-filename=$ProductName.exe"
-    "--product-version=$Version"
+    "--product-version=$WindowsVersion"
     "--output-dir=$OutputDir"
     "--include-data-dir=$ProjectRoot\assets=assets"
     "--include-data-file=$GeneratedVersionFile=assets/version.txt"

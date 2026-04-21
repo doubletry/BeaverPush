@@ -86,7 +86,8 @@ def test_help_content_includes_runtime_version(monkeypatch):
     window = MainWindow()
     try:
         monkeypatch.setattr(main_window_module, "get_app_version", lambda: "2.3.4")
-        content = window._build_help_content("帮助正文")
+        monkeypatch.setattr(window, "_load_help_content", lambda: "帮助正文")
+        content = window._get_help_content()
         assert content.startswith("当前版本: 2.3.4")
         assert content.endswith("帮助正文")
     finally:
@@ -94,13 +95,13 @@ def test_help_content_includes_runtime_version(monkeypatch):
         app.processEvents()
 
 
-def test_help_content_keeps_version_when_file_missing(monkeypatch, tmp_path):
+def test_help_content_shows_version_when_file_missing(monkeypatch, tmp_path):
     app = QApplication.instance() or QApplication([])
     window = MainWindow()
     try:
         monkeypatch.setattr(main_window_module, "get_app_version", lambda: "9.9.9")
         monkeypatch.setattr(main_window_module, "_ASSETS_DIR", tmp_path)
-        content = window._build_help_content()
+        content = window._get_help_content()
         assert "当前版本: 9.9.9" in content
         assert "帮助文件未找到。" in content
     finally:
