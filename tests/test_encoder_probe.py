@@ -5,8 +5,6 @@
 
 from __future__ import annotations
 
-import os
-import tempfile
 from unittest import mock
 
 from beaverpush.services import encoder_probe
@@ -62,15 +60,6 @@ class TestFFmpegListsEncoder:
 
 
 class TestProbeEncoder:
-    def test_create_qsv_probe_video_writes_y4m_file(self):
-        path = encoder_probe._create_qsv_probe_video()
-        try:
-            with open(path, "rb") as f:
-                header = f.read(64)
-            assert header.startswith(b"YUV4MPEG2 W1280 H720 F30:1 ")
-        finally:
-            os.unlink(path)
-
     def test_success(self):
         with mock.patch(
             "beaverpush.services.encoder_probe.subprocess.run",
@@ -98,7 +87,7 @@ class TestProbeEncoder:
             ok, _, _ = encoder_probe._probe_encoder("h264_nvenc")
             assert ok is False
 
-    def test_qsv_probe_uses_init_hw_device(self):
+    def test_qsv_probe_does_not_use_init_hw_device(self):
         captured = {}
 
         def fake_run(cmd, **kwargs):
@@ -111,33 +100,17 @@ class TestProbeEncoder:
         ):
             ok, _, _ = encoder_probe._probe_encoder("h264_qsv")
             assert ok is True
-        assert "-init_hw_device" in captured["cmd"]
-        idx = captured["cmd"].index("-init_hw_device")
-        spec = captured["cmd"][idx + 1]
-        assert spec.startswith("qsv=")
-        # 关键回归：再也不能出现历史上那个非法的 ``hw_any`` 子设备名
-        assert "hw_any" not in spec
+        assert "-init_hw_device" not in captured["cmd"]
 
-    def test_qsv_probe_uses_temp_video_file_source(self):
-        """QSV probe 改为走临时视频文件输入，而不是 lavfi 合成源。
-
-        回归背景：真实用户在 UHD 770 上用命令行直接 ``-c:v hevc_qsv`` 转码正常，
-        但 lavfi ``wrapped_avframe`` probe 会以 ``Error creating a MFX session:
-        -9.`` 失败。这里要求 probe 改成更贴近 ``ffmpeg -i input.mp4`` 的
-        文件输入路径。
-        """
+    def test_qsv_probe_keeps_common_yuv420p_source(self):
+        """回退无效的临时文件 / testsrc2 改动后，QSV 重新使用通用 probe 输入。"""
         captured = {}
-        probe_path = os.path.join(tempfile.gettempdir(), "fake-qsv-probe.y4m")
 
         def fake_run(cmd, **kwargs):
             captured["cmd"] = list(cmd)
             return _fake_completed(returncode=0)
 
-        with mock.patch.object(
-            encoder_probe, "_create_qsv_probe_video", return_value=probe_path,
-        ), mock.patch(
-            "beaverpush.services.encoder_probe.os.unlink",
-        ) as unlink, mock.patch(
+        with mock.patch(
             "beaverpush.services.encoder_probe.subprocess.run",
             side_effect=fake_run,
         ):
@@ -145,49 +118,9 @@ class TestProbeEncoder:
             assert ok is True
         cmd = captured["cmd"]
         i_idx = cmd.index("-i")
-        assert cmd[i_idx + 1] == probe_path
-        assert "lavfi" not in cmd
-        assert "-pix_fmt" not in cmd
-        unlink.assert_called_once_with(probe_path)
-
-    def test_qsv_probe_tries_no_longer_uses_hw_any(self):
-        """所有平台、所有候选 spec 中都不能再包含 ``hw_any``。"""
-        for spec in encoder_probe._qsv_device_specs():
-            assert "hw_any" not in spec, spec
-
-    def test_qsv_probe_tries_multiple_device_specs(self):
-        """第一条 spec 失败 (rc=1, ``device creation failed``)，
-        第二条成功——_probe_encoder 应整体判定为可用。
-        强制走 Windows 候选列表，保证 fallback 逻辑被覆盖。
-        """
-        calls: list[list[str]] = []
-
-        def fake_run(cmd, **kwargs):
-            calls.append(list(cmd))
-            if len(calls) == 1:
-                return _fake_completed(
-                    returncode=1,
-                    stderr="Device creation failed: -3.\n",
-                )
-            return _fake_completed(returncode=0)
-
-        # 直接 mock 候选列表，避免依赖宿主平台
-        win_specs = ("qsv=hw", "qsv=hw,child_device_type=d3d11va")
-        with mock.patch.object(
-            encoder_probe, "_qsv_device_specs", return_value=win_specs,
-        ), mock.patch(
-            "beaverpush.services.encoder_probe.subprocess.run",
-            side_effect=fake_run,
-        ):
-            ok, _, _ = encoder_probe._probe_encoder("h264_qsv")
-        assert ok is True
-        assert len(calls) == 2
-        # 第二次调用必须命中第二条 spec，证明确实换了规范而不是简单重试
-        assert "-init_hw_device" in calls[1]
-        idx0 = calls[0].index("-init_hw_device")
-        idx1 = calls[1].index("-init_hw_device")
-        assert calls[0][idx0 + 1] == "qsv=hw"
-        assert calls[1][idx1 + 1] == "qsv=hw,child_device_type=d3d11va"
+        assert cmd[i_idx + 1] == "testsrc=duration=1:size=320x240:rate=1"
+        pix_idx = cmd.index("-pix_fmt")
+        assert cmd[pix_idx + 1] == "yuv420p"
 
     def test_nvenc_probe_uses_init_hw_device(self):
         captured = {}
