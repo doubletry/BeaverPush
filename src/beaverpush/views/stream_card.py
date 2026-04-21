@@ -50,6 +50,16 @@ ALL_CODEC_OPTIONS: list[str] = [
 CODEC_OPTIONS: list[str] = ALL_CODEC_OPTIONS[:]
 
 
+class NoWheelComboBox(QComboBox):
+    """忽略滚轮切换，避免滚动页面时误改下拉框选项。"""
+
+    def wheelEvent(self, event):
+        if self.view().isVisible():
+            super().wheelEvent(event)
+            return
+        event.ignore()
+
+
 def set_available_codecs(available: list[str]) -> None:
     """根据硬件探测结果裁剪 :data:`CODEC_OPTIONS`。
 
@@ -215,7 +225,7 @@ class StreamCardView(QFrame):
         row.addWidget(lbl)
 
         # 源类型下拉框
-        self._source_type_combo = QComboBox()
+        self._source_type_combo = NoWheelComboBox()
         self._source_type_combo.setFixedWidth(110)
         for key, label in SOURCE_TYPES:
             self._source_type_combo.addItem(label, key)
@@ -227,7 +237,7 @@ class StreamCardView(QFrame):
         row.addWidget(self._source_input, 1)  # stretch=1 填满剩余空间
 
         # 设备下拉框（摄像头/屏幕/窗口）
-        self._device_combo = QComboBox()
+        self._device_combo = NoWheelComboBox()
         self._device_combo.setSizeAdjustPolicy(
             QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
         )
@@ -270,7 +280,7 @@ class StreamCardView(QFrame):
 
         # 配置模式切换
         row.addWidget(QLabel("配置:"))
-        self._settings_combo = QComboBox()
+        self._settings_combo = NoWheelComboBox()
         self._settings_combo.setFixedWidth(100)
         self._settings_combo.addItems(["基本设置", "高级设置"])
         row.addWidget(self._settings_combo)
@@ -297,7 +307,7 @@ class StreamCardView(QFrame):
         lbl = QLabel("编码:")
         lbl.setFixedWidth(50)
         row.addWidget(lbl)
-        self._codec_combo = QComboBox()
+        self._codec_combo = NoWheelComboBox()
         self._codec_combo.setFixedWidth(110)
         self._codec_combo.addItems(CODEC_OPTIONS)
         row.addWidget(self._codec_combo)

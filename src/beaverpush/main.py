@@ -27,7 +27,7 @@ import sys
 from PySide6.QtGui import QFont, QIcon
 from PySide6.QtWidgets import QApplication
 
-from beaverpush import APP_NAME, APP_ICON_PATH
+from beaverpush import APP_NAME, APP_ICON_PATH, APP_VERSION
 from beaverpush.views.theme import Theme
 from beaverpush.views.main_window import MainWindow
 from beaverpush.controllers.app_controller import AppController
@@ -42,6 +42,7 @@ def main():
 
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
+    app.setApplicationVersion(APP_VERSION)
     app.setQuitOnLastWindowClosed(False)
 
     # ── 单实例保护 ──

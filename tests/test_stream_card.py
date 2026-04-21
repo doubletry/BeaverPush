@@ -1,7 +1,8 @@
 from PySide6.QtWidgets import QApplication
-from PySide6.QtGui import QValidator
+from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtGui import QValidator, QWheelEvent
 
-from beaverpush.views.stream_card import StreamCardView
+from beaverpush.views.stream_card import StreamCardView, NoWheelComboBox
 
 
 def test_bitrate_placeholder_uses_fixed_m_unit_text():
@@ -228,6 +229,47 @@ class TestCodecOptionsFiltering:
                 app.processEvents()
         finally:
             sc.CODEC_OPTIONS = original
+
+
+class TestComboBoxWheelGuard:
+    """验证下拉框不会被滚轮误改选项。"""
+
+    def test_all_stream_card_combos_use_no_wheel_combo(self):
+        app = QApplication.instance() or QApplication([])
+        card = StreamCardView(0)
+        try:
+            combos = [
+                card._source_type_combo,
+                card._device_combo,
+                card._settings_combo,
+                card._codec_combo,
+            ]
+            assert all(isinstance(combo, NoWheelComboBox) for combo in combos)
+        finally:
+            card.deleteLater()
+            app.processEvents()
+
+    def test_wheel_does_not_change_source_type_selection(self):
+        app = QApplication.instance() or QApplication([])
+        card = StreamCardView(0)
+        try:
+            combo = card._source_type_combo
+            combo.setCurrentIndex(0)
+            event = QWheelEvent(
+                QPointF(5, 5),
+                QPointF(5, 5),
+                QPoint(0, 0),
+                QPoint(0, -120),
+                Qt.MouseButton.NoButton,
+                Qt.KeyboardModifier.NoModifier,
+                Qt.ScrollPhase.ScrollUpdate,
+                False,
+            )
+            QApplication.sendEvent(combo, event)
+            assert combo.currentIndex() == 0
+        finally:
+            card.deleteLater()
+            app.processEvents()
 
     def test_refresh_available_codecs_updates_existing_card_and_falls_back(self):
         from beaverpush.views import stream_card as sc

@@ -1,5 +1,6 @@
 from PySide6.QtWidgets import QApplication, QFrame, QLineEdit, QPushButton
 
+from beaverpush.views import main_window as main_window_module
 from beaverpush.views.main_window import MainWindow
 
 
@@ -75,6 +76,53 @@ def test_move_card_at_boundaries_returns_false():
         assert window.move_card(c0, -1) is False  # 第一张不能上移
         assert window.move_card(c1, +1) is False  # 最后一张不能下移
         assert window.get_cards() == [c0, c1]
+    finally:
+        window.deleteLater()
+        app.processEvents()
+
+
+def test_help_content_includes_runtime_version(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    try:
+        calls: list[str] = []
+
+        def fake_get_app_version():
+            calls.append("called")
+            return "2.3.4"
+
+        monkeypatch.setattr(main_window_module, "get_app_version", fake_get_app_version)
+        monkeypatch.setattr(window, "_load_help_content", lambda: "帮助正文")
+        content = window._get_help_content()
+        assert calls == ["called"]
+        assert content.startswith("当前版本: 2.3.4")
+        assert content.endswith("帮助正文")
+    finally:
+        window.deleteLater()
+        app.processEvents()
+
+
+def test_load_help_content_reads_help_file(monkeypatch, tmp_path):
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    try:
+        monkeypatch.setattr(main_window_module, "_ASSETS_DIR", tmp_path)
+        (tmp_path / "help.txt").write_text("文件中的帮助正文", encoding="utf-8")
+        assert window._load_help_content() == "文件中的帮助正文"
+    finally:
+        window.deleteLater()
+        app.processEvents()
+
+
+def test_help_content_shows_version_when_file_missing(monkeypatch, tmp_path):
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    try:
+        monkeypatch.setattr(main_window_module, "get_app_version", lambda: "9.9.9")
+        monkeypatch.setattr(main_window_module, "_ASSETS_DIR", tmp_path)
+        content = window._get_help_content()
+        assert "当前版本: 9.9.9" in content
+        assert "帮助文件未找到。" in content
     finally:
         window.deleteLater()
         app.processEvents()

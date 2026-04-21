@@ -14,112 +14,161 @@
 #>
 
 param(
-    [string]$Version = "0.1.0"
+    [string]$Version = ""
 )
 
 $ErrorActionPreference = "Stop"
 
 # ── 项目根目录（脚本所在位置）──
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$PyprojectPath = Join-Path $ProjectRoot "pyproject.toml"
 
-# ── 基本 参数 ──
-$EntryPoint    = Join-Path $ProjectRoot "src\beaverpush\main.py"
-$OutputDir     = Join-Path $ProjectRoot "dist"
-$ProductName   = "BeaverPush"
-$IconPath      = Join-Path $ProjectRoot "assets\beaver_logo.ico"
+function Get-ProjectVersion {
+    param([string]$Path)
 
-# ── Nuitka 编译参数 ──
-$NuitkaArgs = @(
-    "--standalone"
-    "--assume-yes-for-downloads"
-    "--enable-plugin=pyside6"
-    "--windows-console-mode=disable"
-    "--windows-product-name=$ProductName"
-    "--output-filename=$ProductName.exe"
-    "--product-version=$Version"
-    "--output-dir=$OutputDir"
-    "--include-data-dir=$ProjectRoot\assets=assets"
-)
-
-# 如果有 .ico 图标则添加
-if (Test-Path $IconPath) {
-    $NuitkaArgs += "--windows-icon-from-ico=$IconPath"
-    Write-Host "[INFO] 使用图标: $IconPath" -ForegroundColor Cyan
+    $match = Select-String -Path $Path -Pattern '^\s*version\s*=\s*"([^"]+)"' | Select-Object -First 1
+    if (-not $match) {
+        throw "未能从 pyproject.toml 读取版本号: $Path"
+    }
+    return $match.Matches[0].Groups[1].Value
 }
 
-Write-Host ""
-Write-Host "========================================" -ForegroundColor Blue
-Write-Host "  BeaverPush Nuitka 编译构建" -ForegroundColor Blue
-Write-Host "========================================" -ForegroundColor Blue
-Write-Host ""
-Write-Host "[INFO] 入口文件:  $EntryPoint"
-Write-Host "[INFO] 输出目录:  $OutputDir"
-Write-Host "[INFO] 产品名称:  $ProductName"
-Write-Host "[INFO] 版本号:    $Version"
-Write-Host ""
+function Convert-ToWindowsVersion {
+    param([string]$RawVersion)
 
-# ── 执行编译 ──
-Write-Host "[BUILD] 开始编译..." -ForegroundColor Yellow
-uv run python -m nuitka @NuitkaArgs $EntryPoint
-
-if ($LASTEXITCODE -eq 0) {
-    Write-Host ""
-    Write-Host "[SUCCESS] 编译完成!" -ForegroundColor Green
-    Write-Host "[INFO] 输出位置: $OutputDir\main.dist" -ForegroundColor Cyan
-    Write-Host ""
-} else {
-    Write-Host ""
-    Write-Host "[ERROR] 编译失败, 退出码: $LASTEXITCODE" -ForegroundColor Red
-    exit $LASTEXITCODE
+    # Windows 版本资源必须是纯数字的四段格式；若 tag/pyproject 使用
+    # semver 预发布或 build metadata（如 1.2.3-beta.1 / 1.2.3+5），这里
+    # 仅截取前面的核心版本号用于 EXE/Setup 的版本资源。
+    $normalized = $RawVersion.Trim() -replace '[-+].*$', ''
+    $parts = $normalized.Split(".")
+    if ($parts.Count -gt 4) {
+        throw "版本号段数过多，无法转换为 Windows 四段版本: $RawVersion"
+    }
+    foreach ($part in $parts) {
+        if ($part -notmatch '^\d+$') {
+            throw "版本号包含非数字字段，无法转换为 Windows 四段版本: $RawVersion"
+        }
+    }
+    while ($parts.Count -lt 4) {
+        $parts += "0"
+    }
+    return ($parts -join ".")
 }
 
-# ── 生成安装包 (Inno Setup) ──
-$IssFile = Join-Path $ProjectRoot "installer.iss"
-if (-not (Test-Path $IssFile)) {
-    Write-Host "[SKIP] 未找到 installer.iss, 跳过安装包生成" -ForegroundColor Yellow
-    exit 0
+if ([string]::IsNullOrWhiteSpace($Version)) {
+    $Version = Get-ProjectVersion -Path $PyprojectPath
 }
+$WindowsVersion = Convert-ToWindowsVersion -RawVersion $Version
+$GeneratedVersionFile = (New-TemporaryFile).FullName
+Set-Content -Path $GeneratedVersionFile -Value $Version -Encoding utf8
 
-# 查找 iscc.exe
-$IsccPaths = @(
-    "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
-    "${env:ProgramFiles}\Inno Setup 6\ISCC.exe"
-    "${env:ProgramFiles(x86)}\Inno Setup 5\ISCC.exe"
-)
-$Iscc = $null
-foreach ($p in $IsccPaths) {
-    if (Test-Path $p) { $Iscc = $p; break }
+try {
+    # ── 基本 参数 ──
+    $EntryPoint    = Join-Path $ProjectRoot "src\beaverpush\main.py"
+    $OutputDir     = Join-Path $ProjectRoot "dist"
+    $ProductName   = "BeaverPush"
+    $IconPath      = Join-Path $ProjectRoot "assets\beaver_logo.ico"
+
+    # ── Nuitka 编译参数 ──
+    $NuitkaArgs = @(
+        "--standalone"
+        "--assume-yes-for-downloads"
+        "--enable-plugin=pyside6"
+        "--windows-console-mode=disable"
+        "--windows-product-name=$ProductName"
+        "--output-filename=$ProductName.exe"
+        "--product-version=$WindowsVersion"
+        "--output-dir=$OutputDir"
+        "--include-data-dir=$ProjectRoot\assets=assets"
+        "--include-data-file=$GeneratedVersionFile=assets/version.txt"
+    )
+
+    # 如果有 .ico 图标则添加
+    if (Test-Path $IconPath) {
+        $NuitkaArgs += "--windows-icon-from-ico=$IconPath"
+        Write-Host "[INFO] 使用图标: $IconPath" -ForegroundColor Cyan
+    }
+
+    Write-Host ""
+    Write-Host "========================================" -ForegroundColor Blue
+    Write-Host "  BeaverPush Nuitka 编译构建" -ForegroundColor Blue
+    Write-Host "========================================" -ForegroundColor Blue
+    Write-Host ""
+    Write-Host "[INFO] 入口文件:  $EntryPoint"
+    Write-Host "[INFO] 输出目录:  $OutputDir"
+    Write-Host "[INFO] 产品名称:  $ProductName"
+    Write-Host "[INFO] 版本号:    $Version"
+    Write-Host "[INFO] 安装器版本: $WindowsVersion"
+    Write-Host ""
+
+    # ── 执行编译 ──
+    Write-Host "[BUILD] 开始编译..." -ForegroundColor Yellow
+    uv run python -m nuitka @NuitkaArgs $EntryPoint
+
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host ""
+        Write-Host "[SUCCESS] 编译完成!" -ForegroundColor Green
+        Write-Host "[INFO] 输出位置: $OutputDir\main.dist" -ForegroundColor Cyan
+        Write-Host ""
+    } else {
+        Write-Host ""
+        Write-Host "[ERROR] 编译失败, 退出码: $LASTEXITCODE" -ForegroundColor Red
+        exit $LASTEXITCODE
+    }
+
+    # ── 生成安装包 (Inno Setup) ──
+    $IssFile = Join-Path $ProjectRoot "installer.iss"
+    if (-not (Test-Path $IssFile)) {
+        Write-Host "[SKIP] 未找到 installer.iss, 跳过安装包生成" -ForegroundColor Yellow
+        exit 0
+    }
+
+    # 查找 iscc.exe
+    $IsccPaths = @(
+        "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+        "${env:ProgramFiles}\Inno Setup 6\ISCC.exe"
+        "${env:ProgramFiles(x86)}\Inno Setup 5\ISCC.exe"
+    )
+    $Iscc = $null
+    foreach ($p in $IsccPaths) {
+        if (Test-Path $p) { $Iscc = $p; break }
+    }
+    # 也尝试从 PATH 中查找
+    if (-not $Iscc) {
+        $Iscc = (Get-Command "iscc" -ErrorAction SilentlyContinue).Source
+    }
+
+    if (-not $Iscc) {
+        Write-Host ""
+        Write-Host "[SKIP] 未找到 Inno Setup (iscc.exe), 跳过安装包生成" -ForegroundColor Yellow
+        Write-Host "[TIP]  访问 https://jrsoftware.org/isinfo.php 下载安装 Inno Setup 6" -ForegroundColor Yellow
+        Write-Host "[TIP]  安装后再次运行此脚本即可自动生成安装包" -ForegroundColor Yellow
+        exit 0
+    }
+
+    Write-Host ""
+    Write-Host "========================================" -ForegroundColor Blue
+    Write-Host "  Inno Setup 安装包生成" -ForegroundColor Blue
+    Write-Host "========================================" -ForegroundColor Blue
+    Write-Host "[INFO] ISCC: $Iscc"
+    Write-Host "[INFO] ISS:  $IssFile"
+    Write-Host ""
+
+    & $Iscc "/DMySourceDir=$ProjectRoot" "/DMyAppVersion=$Version" "/DMyAppVersionInfoVersion=$WindowsVersion" $IssFile
+
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host ""
+        Write-Host "[SUCCESS] 安装包生成完成!" -ForegroundColor Green
+        Write-Host "[INFO] 安装包: $OutputDir\BeaverPushSetup.exe" -ForegroundColor Cyan
+        Write-Host ""
+    } else {
+        Write-Host ""
+        Write-Host "[ERROR] 安装包生成失败, 退出码: $LASTEXITCODE" -ForegroundColor Red
+        exit $LASTEXITCODE
+    }
 }
-# 也尝试从 PATH 中查找
-if (-not $Iscc) {
-    $Iscc = (Get-Command "iscc" -ErrorAction SilentlyContinue).Source
-}
-
-if (-not $Iscc) {
-    Write-Host ""
-    Write-Host "[SKIP] 未找到 Inno Setup (iscc.exe), 跳过安装包生成" -ForegroundColor Yellow
-    Write-Host "[TIP]  访问 https://jrsoftware.org/isinfo.php 下载安装 Inno Setup 6" -ForegroundColor Yellow
-    Write-Host "[TIP]  安装后再次运行此脚本即可自动生成安装包" -ForegroundColor Yellow
-    exit 0
-}
-
-Write-Host ""
-Write-Host "========================================" -ForegroundColor Blue
-Write-Host "  Inno Setup 安装包生成" -ForegroundColor Blue
-Write-Host "========================================" -ForegroundColor Blue
-Write-Host "[INFO] ISCC: $Iscc"
-Write-Host "[INFO] ISS:  $IssFile"
-Write-Host ""
-
-& $Iscc $IssFile
-
-if ($LASTEXITCODE -eq 0) {
-    Write-Host ""
-    Write-Host "[SUCCESS] 安装包生成完成!" -ForegroundColor Green
-    Write-Host "[INFO] 安装包: $OutputDir\BeaverPushSetup.exe" -ForegroundColor Cyan
-    Write-Host ""
-} else {
-    Write-Host ""
-    Write-Host "[ERROR] 安装包生成失败, 退出码: $LASTEXITCODE" -ForegroundColor Red
-    exit $LASTEXITCODE
+finally {
+    if (Test-Path $GeneratedVersionFile) {
+        Remove-Item $GeneratedVersionFile -Force -ErrorAction SilentlyContinue
+    }
 }

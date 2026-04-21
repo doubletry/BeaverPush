@@ -36,6 +36,10 @@ from ..views.stream_card import StreamCardView
 from .stream_controller import StreamController
 from ..services.log_service import logger
 
+BULK_START_INTERVAL_MS = 250
+MANUAL_BULK_START_INITIAL_DELAY_MS = 0
+AUTO_BULK_START_INITIAL_DELAY_MS = 500
+
 
 class AppController(QObject):
     """应用级控制器。
@@ -67,6 +71,12 @@ class AppController(QObject):
         self._controllers: list[StreamController] = []
         self._tray: QSystemTrayIcon | None = None
         self._test_worker: ConnectivityCheckWorker | None = None
+        self._bulk_start_timer = QTimer(self)
+        self._bulk_start_timer.setSingleShot(True)
+        self._bulk_start_timer.timeout.connect(self._start_next_queued_stream)
+        self._bulk_start_queue: list[StreamController] = []
+        self._bulk_start_total = 0
+        self._bulk_start_started = 0
         # 加载配置过程中跳过自动保存，避免在恢复期间反复写盘。
         self._loading_config: bool = False
         self.codecs_detected.connect(
@@ -199,21 +209,25 @@ class AppController(QObject):
 
     def _on_start_all(self):
         """全部开始推流。"""
-        started = 0
-        for ctrl in self._controllers:
-            if not ctrl.is_streaming:
-                ctrl.start_stream()
-                started += 1
-        self._window.set_status(f"已启动 {started} 路推流")
+        self._queue_bulk_start(
+            self._controllers,
+            initial_delay_ms=MANUAL_BULK_START_INITIAL_DELAY_MS,
+        )
 
     def _on_stop_all(self):
         """全部停止推流。"""
+        pending = self._cancel_bulk_start(update_status=False)
         stopped = 0
         for ctrl in self._controllers:
             if ctrl.is_streaming:
                 ctrl.stop_stream()
                 stopped += 1
-        self._window.set_status(f"已停止 {stopped} 路推流")
+        if pending > 0 and stopped > 0:
+            self._window.set_status(f"已停止 {stopped} 路推流，取消 {pending} 路待启动")
+        elif pending > 0:
+            self._window.set_status(f"已取消 {pending} 路待启动通道")
+        else:
+            self._window.set_status(f"已停止 {stopped} 路推流")
 
     def _on_test(self):
         """测试 RTSP 服务器连接。
@@ -340,6 +354,7 @@ class AppController(QObject):
             self._window.set_status("请先停止推流再移除")
             return
 
+        self._cancel_bulk_start(update_status=False)
         ctrl.force_stop()
         self._window.remove_card(ctrl.card)
         self._controllers.remove(ctrl)
@@ -546,18 +561,101 @@ class AppController(QObject):
         # 加载完成后刷新一次序号/移动按钮状态
         self._refresh_card_positions()
 
-        # 延迟启动，确保所有 UI 就绪；并按 ~250ms 间隔逐个启动而不是
-        # 一口气全部并发，避免：
-        #   1) 多路编码器同时初始化抢 GPU/CPU，
-        #   2) 主线程在循环里同步执行 ``probe_hikcamera_size`` / ``Popen``
-        #      等阻塞调用造成 UI 长时间卡死。
         if auto_start_ctrls:
-            stagger_ms = 250
-            for i, c in enumerate(auto_start_ctrls):
-                QTimer.singleShot(
-                    500 + i * stagger_ms,
-                    lambda ctrl=c: ctrl.start_stream(),
-                )
+            self._queue_bulk_start(
+                auto_start_ctrls,
+                initial_delay_ms=AUTO_BULK_START_INITIAL_DELAY_MS,
+            )
+
+    def _collect_startable_controllers(
+        self,
+        controllers: list[StreamController],
+        controller_ids: set[int] | None = None,
+    ) -> list[StreamController]:
+        """收集当前可启动的通道，保持原有顺序并去重。"""
+        startable: list[StreamController] = []
+        seen_ids: set[int] = set()
+        valid_controller_ids = controller_ids or {id(ctrl) for ctrl in self._controllers}
+        for ctrl in controllers:
+            if id(ctrl) in seen_ids:
+                continue
+            seen_ids.add(id(ctrl))
+            if id(ctrl) not in valid_controller_ids or ctrl.is_streaming:
+                continue
+            startable.append(ctrl)
+        return startable
+
+    def _get_pending_startable_controllers(self) -> list[StreamController]:
+        """返回批量启动队列中当前仍可启动的通道快照。"""
+        controller_ids = {id(ctrl) for ctrl in self._controllers}
+        return self._collect_startable_controllers(
+            self._bulk_start_queue,
+            controller_ids=controller_ids,
+        )
+
+    def _queue_bulk_start(
+        self,
+        controllers: list[StreamController],
+        *,
+        initial_delay_ms: int,
+    ) -> int:
+        """按队列分批启动多路推流。"""
+        startable = self._collect_startable_controllers(controllers)
+        self._cancel_bulk_start(update_status=False)
+        if not startable:
+            self._window.set_status("没有可启动的推流通道")
+            return 0
+
+        self._bulk_start_queue = startable
+        self._bulk_start_total = len(startable)
+        self._bulk_start_started = 0
+        self._window.set_status(f"已加入批量启动队列，共 {len(startable)} 路待启动")
+        self._bulk_start_timer.start(max(0, initial_delay_ms))
+        return len(startable)
+
+    def _start_next_queued_stream(self):
+        """启动队列中的下一路推流。"""
+        pending = self._get_pending_startable_controllers()
+        if not pending:
+            self._finish_bulk_start()
+            return
+
+        self._bulk_start_total = self._bulk_start_started + len(pending)
+        ctrl = pending[0]
+        self._bulk_start_queue = pending[1:]
+
+        current = self._bulk_start_started + 1
+        self._window.set_status(
+            f"批量启动中：正在启动第 {current}/{self._bulk_start_total} 路"
+        )
+        ctrl.start_stream()
+        self._bulk_start_started += 1
+
+        if self._bulk_start_queue:
+            self._bulk_start_timer.start(BULK_START_INTERVAL_MS)
+        else:
+            self._finish_bulk_start()
+
+    def _finish_bulk_start(self):
+        """结束批量启动流程。"""
+        started = self._bulk_start_started
+        self._bulk_start_timer.stop()
+        self._bulk_start_queue.clear()
+        self._bulk_start_total = 0
+        self._bulk_start_started = 0
+        if started > 0:
+            self._window.set_status(f"批量启动完成，已发起 {started} 路推流")
+
+    def _cancel_bulk_start(self, *, update_status: bool = True) -> int:
+        """取消尚未发起的批量启动任务。"""
+        pending = len(self._bulk_start_queue)
+        self._bulk_start_timer.stop()
+        self._bulk_start_queue.clear()
+        self._bulk_start_total = 0
+        self._bulk_start_started = 0
+        if pending > 0 and update_status:
+            self._window.set_status(f"已取消批量启动，剩余 {pending} 路未启动")
+        return pending
 
     # ==================================================================
     #  系统托盘
@@ -613,6 +711,7 @@ class AppController(QObject):
         关闭窗口时最小化到系统托盘而非退出应用。
         退出只能通过托盘右键菜单「退出」来触发。
         """
+        self._cancel_bulk_start(update_status=False)
         event.ignore()
         self._window.hide()
         if self._tray:
@@ -633,6 +732,7 @@ class AppController(QObject):
 
     def _cleanup_and_quit(self):
         """执行退出清理：保存配置 → 停止所有推流 → 隐藏托盘 → 退出。"""
+        self._cancel_bulk_start(update_status=False)
         self.save_config()
         for ctrl in self._controllers:
             ctrl.force_stop()

@@ -12,6 +12,10 @@
 #ifndef MyAppVersion
   #define MyAppVersion "0.1.0"
 #endif
+#ifndef MyAppVersionInfoVersion
+  ; Windows 版本资源要求四段数字格式，和展示给用户的 MyAppVersion 分开。
+  #define MyAppVersionInfoVersion "0.1.0.0"
+#endif
 #define MyAppPublisher "Company, Inc."
 #define MyAppURL "https://www.company.com/"
 #define MyAppExeName "BeaverPush.exe"
@@ -22,11 +26,12 @@
 AppId={{DE0BEDD5-93CD-4D64-9344-B12B5EA2D9C0}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
-;AppVerName={#MyAppName} {#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}
+VersionInfoVersion={#MyAppVersionInfoVersion}
+VersionInfoProductVersion={#MyAppVersionInfoVersion}
 DefaultDirName={autopf}\BeaverPush
 UninstallDisplayIcon={app}\{#MyAppExeName}
 ; "ArchitecturesAllowed=x64compatible" specifies that Setup cannot run
@@ -70,4 +75,3 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
-
