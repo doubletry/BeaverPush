@@ -87,7 +87,6 @@ try {
     }
 
     Write-Host ""
-    Write-Host ""
     Write-Host "========================================" -ForegroundColor Blue
     Write-Host "  BeaverPush Nuitka 编译构建" -ForegroundColor Blue
     Write-Host "========================================" -ForegroundColor Blue
