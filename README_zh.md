@@ -148,7 +148,7 @@ src/beaverpush/
 推送版本标签（如 `v1.0.0`）时自动触发 GitHub Actions 构建流程：
 
 1. 配置 Python 3.12 + uv 环境
-2. 下载 FFmpeg 二进制文件
+2. 下载打包所用的固定 FFmpeg n8.1 shared 二进制文件
 3. 安装 Inno Setup 6
 4. 使用 Nuitka 编译并打包安装程序
 5. 执行静默安装验证测试

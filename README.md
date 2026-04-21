@@ -148,7 +148,7 @@ src/beaverpush/
 Automated builds are triggered by pushing a version tag (e.g. `v1.0.0`). The GitHub Actions workflow:
 
 1. Sets up Python 3.12 + uv
-2. Downloads FFmpeg binaries
+2. Downloads the pinned FFmpeg n8.1 shared binaries used for packaging
 3. Installs Inno Setup 6
 4. Compiles with Nuitka and packages the installer
 5. Runs a silent install verification test
