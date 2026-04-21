@@ -41,10 +41,9 @@ jobs:
         run: |
           $ffmpegVersion = "8.1"
           $ffmpegReleaseRepo = "GyanD/codexffmpeg"
-          $ffmpegReleaseTag = "8.1"
           $ffmpegAssetName = "ffmpeg-8.1-full_build-shared.zip"
           $ffmpegAssetSha256 = "e184e012ca9a3527ed45d61f8e250c50b07b8661d90849820ea754239049efb4"
-          $ffmpegUrl = "https://github.com/$ffmpegReleaseRepo/releases/download/$ffmpegReleaseTag/$ffmpegAssetName"
+          $ffmpegUrl = "https://github.com/$ffmpegReleaseRepo/releases/download/$ffmpegVersion/$ffmpegAssetName"
           $zipPath = "$env:RUNNER_TEMP\ffmpeg.zip"
           $extractPath = "$env:RUNNER_TEMP\ffmpeg-extract"
           $escapedFfmpegVersion = [regex]::Escape($ffmpegVersion)
@@ -54,7 +53,7 @@ jobs:
           }
 
           Write-Host "Downloading FFmpeg $ffmpegVersion (shared build)..."
-          Write-Host "Source release: $ffmpegReleaseRepo@$ffmpegReleaseTag"
+          Write-Host "Source release: $ffmpegReleaseRepo@$ffmpegVersion"
           Write-Host "Source URL: $ffmpegUrl"
           Invoke-WebRequest -Uri $ffmpegUrl -OutFile $zipPath -UseBasicParsing
 
