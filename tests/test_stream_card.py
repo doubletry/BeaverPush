@@ -191,6 +191,46 @@ class TestHikCameraSourceType:
             card.deleteLater()
             app.processEvents()
 
+    def test_hik_use_sdk_decode_default_checked_and_visible_only_for_hikcamera(self):
+        app = QApplication.instance() or QApplication([])
+        card = StreamCardView(0)
+        try:
+            # 默认勾选
+            assert card.get_hik_use_sdk_decode() is True
+            # 默认源类型是 video，海康选项应隐藏
+            card.set_source_type("video")
+            app.processEvents()
+            assert card._hik_options_container.isHidden()
+            # 切到 hikcamera 后可见
+            card.set_source_type("hikcamera")
+            app.processEvents()
+            assert not card._hik_options_container.isHidden()
+            # 切回其他源类型再次隐藏
+            card.set_source_type("rtsp")
+            app.processEvents()
+            assert card._hik_options_container.isHidden()
+        finally:
+            card.deleteLater()
+            app.processEvents()
+
+    def test_set_hik_use_sdk_decode_does_not_emit_signal(self):
+        app = QApplication.instance() or QApplication([])
+        card = StreamCardView(0)
+        try:
+            received: list[bool] = []
+            card.hik_use_sdk_decode_toggled.connect(received.append)
+            card.set_hik_use_sdk_decode(False)
+            app.processEvents()
+            assert card.get_hik_use_sdk_decode() is False
+            assert received == []
+            # 用户主动点击应触发信号
+            card._hik_use_sdk_decode_check.setChecked(True)
+            app.processEvents()
+            assert received == [True]
+        finally:
+            card.deleteLater()
+            app.processEvents()
+
 
 class TestCodecOptionsFiltering:
     """验证 set_available_codecs 按硬件探测结果裁剪下拉框。"""

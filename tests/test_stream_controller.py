@@ -83,6 +83,7 @@ def _make_mock_card():
         "width_edited", "height_edited", "fps_edited", "bitrate_edited",
         "source_reconnect_interval_edited", "source_reconnect_max_attempts_edited",
         "loop_toggled", "preview_clicked", "title_edited",
+        "hik_use_sdk_decode_toggled",
     ]:
         getattr(card, sig).connect = mock.MagicMock()
     return card
@@ -514,6 +515,42 @@ class TestStreamControllerConfig:
         card.set_source_reconnect_interval.assert_called_with(11)
         card.set_source_reconnect_max_attempts.assert_called_with(0)
 
+    def test_to_config_includes_hik_use_sdk_decode(self):
+        card = _make_mock_card()
+        ctrl = StreamController(
+            card=card, channel_index=0,
+            rtsp_server_getter=lambda: "rtsp://localhost:8554",
+            username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
+        )
+        # 默认值
+        cfg = ctrl.to_config()
+        assert cfg.hik_use_sdk_decode is True
+        # 关闭后保留
+        ctrl._hik_use_sdk_decode = False
+        cfg = ctrl.to_config()
+        assert cfg.hik_use_sdk_decode is False
+
+    def test_from_config_restores_hik_use_sdk_decode(self):
+        card = _make_mock_card()
+        ctrl = StreamController(
+            card=card, channel_index=0,
+            rtsp_server_getter=lambda: "rtsp://localhost:8554",
+            username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
+        )
+        cfg = StreamConfig(
+            name="s1", source_type="hikcamera", source_path="SN001",
+            hik_use_sdk_decode=False,
+        )
+        ctrl.from_config(cfg)
+        assert ctrl._hik_use_sdk_decode is False
+        card.set_hik_use_sdk_decode.assert_called_with(False)
+
+    def test_legacy_config_without_field_defaults_to_true(self):
+        """旧 config.json 没有 hik_use_sdk_decode 字段时应默认为 True。"""
+        from beaverpush.models.config import load_stream_config
+        cfg = load_stream_config({"name": "old", "source_type": "hikcamera"})
+        assert cfg.hik_use_sdk_decode is True
+
 
 class TestStreamControllerState:
     def test_initial_state_is_idle(self):
@@ -561,6 +598,20 @@ class TestStreamControllerState:
         cfg = StreamConfig(name="s1", source_type="video")
         ctrl.from_config(cfg)
         card.set_advanced_mode.assert_called_with(False)
+
+    def test_from_config_shows_advanced_when_hikcamera_sdk_decode_disabled(self):
+        """对 hikcamera 源，关闭 SDK 解码（偏离默认 True）时自动展开高级面板。"""
+        card = _make_mock_card()
+        ctrl = StreamController(
+            card=card, channel_index=0,
+            rtsp_server_getter=lambda: "", username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
+        )
+        cfg = StreamConfig(
+            name="s1", source_type="hikcamera", source_path="SN001",
+            hik_use_sdk_decode=False,
+        )
+        ctrl.from_config(cfg)
+        card.set_advanced_mode.assert_called_with(True)
 
     def test_channel_index(self):
         card = _make_mock_card()
@@ -922,7 +973,9 @@ class TestHikCameraStartStream:
             worker = mock_worker_cls.return_value
             ctrl._start_stream_impl(preflight=False)
 
-        worker.set_hik_capture.assert_called_once_with("SN42", 2592, 1944, 30)
+        worker.set_hik_capture.assert_called_once_with(
+            "SN42", 2592, 1944, 30, use_sdk_decode=True
+        )
         worker.set_source_type.assert_called_once_with("hikcamera")
         worker.start.assert_called_once()
 

@@ -49,6 +49,7 @@ class _FakeCamera:
         self.callback = None
         self.on_exception = None
         self.exit_called = False
+        self.use_sdk_decode_calls: list[bool] = []
         _FakeCamera.instances.append(self)
 
     # context manager
@@ -62,6 +63,9 @@ class _FakeCamera:
     # camera api subset
     def open(self, mode):  # noqa: ARG002
         self.opened = True
+
+    def set_use_sdk_decode(self, enable):
+        self.use_sdk_decode_calls.append(bool(enable))
 
     def start_grabbing(self, callback=None, output_format=None, on_exception=None):  # noqa: ARG002
         self.grabbing = True
@@ -308,3 +312,64 @@ def test_make_even_helper():
     assert _make_even(0) == 0
     assert _make_even(2) == 2
     assert _make_even(3) == 4
+
+
+# ---------------------------------------------------------------------------
+# set_use_sdk_decode 透传
+# ---------------------------------------------------------------------------
+
+class TestUseSdkDecodePassthrough:
+    def test_probe_default_calls_set_use_sdk_decode_true(self, fake_hikcamera):
+        _install_fake_hikcamera(lambda sn: _FakeCamera(sn))
+        probe_hikcamera_size("SN001")
+        assert _FakeCamera.instances[0].use_sdk_decode_calls == [True]
+
+    def test_probe_can_disable_sdk_decode(self, fake_hikcamera):
+        _install_fake_hikcamera(lambda sn: _FakeCamera(sn))
+        probe_hikcamera_size("SN001", use_sdk_decode=False)
+        assert _FakeCamera.instances[0].use_sdk_decode_calls == [False]
+
+    def test_feeder_default_calls_set_use_sdk_decode_true(self, fake_hikcamera):
+        _install_fake_hikcamera(lambda sn: _FakeCamera(sn))
+        feeder = HikCameraFeeder("SN001", 640, 480, 30)
+        feeder.start(_FakeProcess(_FakeStdin()))
+        assert _FakeCamera.instances[0].use_sdk_decode_calls == [True]
+        feeder.stop()
+
+    def test_feeder_can_disable_sdk_decode(self, fake_hikcamera):
+        _install_fake_hikcamera(lambda sn: _FakeCamera(sn))
+        feeder = HikCameraFeeder("SN001", 640, 480, 30, use_sdk_decode=False)
+        feeder.start(_FakeProcess(_FakeStdin()))
+        assert _FakeCamera.instances[0].use_sdk_decode_calls == [False]
+        feeder.stop()
+
+    def test_camera_without_set_use_sdk_decode_is_tolerated(self, fake_hikcamera):
+        # 模拟旧版 SDK：相机对象不存在 set_use_sdk_decode 方法
+        class _BareCamera:
+            instances: list = []
+
+            def __init__(self, sn):
+                self.sn = sn
+                _BareCamera.instances.append(self)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def open(self, mode):  # noqa: ARG002
+                pass
+
+            def start_grabbing(self, callback=None, output_format=None, on_exception=None):  # noqa: ARG002
+                pass
+
+            def stop_grabbing(self):
+                pass
+
+            def get_frame(self, timeout_ms=1000, output_format=None):  # noqa: ARG002
+                return np.zeros((480, 640, 3), dtype=np.uint8)
+
+        _install_fake_hikcamera(lambda sn: _BareCamera(sn))
+        # 不应抛错
+        probe_hikcamera_size("SN001")

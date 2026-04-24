@@ -46,6 +46,9 @@ class StreamConfig:
         framerate:    输出帧率
         bitrate:      输出码率 (如 ``"2M"``)
         auto_start:   是否自动开始推流（保存时记录推流状态，加载时自动恢复）
+        hik_use_sdk_decode: 仅对 ``"hikcamera"`` 源类型有效；为 ``True`` 时
+            使用海康 SDK 内置的 RAW→RGB 解码管线（默认），为 ``False`` 时
+            回退到 OpenCV 解码路径。两条路径输出图像略有差异。
     """
     name: str = ""
     title: str = ""             # 通道标题（可由用户自定义）
@@ -62,6 +65,7 @@ class StreamConfig:
     auto_start: bool = False
     source_reconnect_interval: int = 5
     source_reconnect_max_attempts: int = 0
+    hik_use_sdk_decode: bool = True
 
 
 @dataclass

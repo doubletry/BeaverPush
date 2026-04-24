@@ -236,6 +236,7 @@ class FFmpegWorker(QThread):
         self._hik_w: int = 0
         self._hik_h: int = 0
         self._hik_fps: int = 30
+        self._hik_use_sdk_decode: bool = True
         self._preview_monitor_thread: threading.Thread | None = None
         self._streaming_announced = False
         self._source_type: str = "video"
@@ -267,12 +268,21 @@ class FFmpegWorker(QThread):
         self._screen_h = h
         self._screen_fps = fps
 
-    def set_hik_capture(self, sn: str, width: int, height: int, fps: int = 30):
+    def set_hik_capture(
+        self,
+        sn: str,
+        width: int,
+        height: int,
+        fps: int = 30,
+        *,
+        use_sdk_decode: bool = True,
+    ):
         """配置海康工业相机捕获参数（在 ``run()`` 之前调用）。"""
         self._hik_sn = (sn or "").strip()
         self._hik_w = int(width)
         self._hik_h = int(height)
         self._hik_fps = fps if fps > 0 else 30
+        self._hik_use_sdk_decode = bool(use_sdk_decode)
 
     def start_preview_now(self, rtsp_url: str):
         """在推流过程中动态开启预览。"""
@@ -324,6 +334,7 @@ class FFmpegWorker(QThread):
             elif use_pipe and self._hik_sn:
                 self._hik_feeder = HikCameraFeeder(
                     self._hik_sn, self._hik_w, self._hik_h, self._hik_fps,
+                    use_sdk_decode=self._hik_use_sdk_decode,
                 )
                 self._hik_feeder.set_error_callback(self.error_occurred.emit)
                 try:

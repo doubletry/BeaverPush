@@ -13,7 +13,7 @@ dependencies = [
     "loguru>=0.7.0,<1.0.0",
     "nuitka>=4.0.3,<5.0.0",
     "numpy>=1.26.0,<3.0.0",
-    "hikcamera==2.0.0",
+    "hikcamera==2.1.1",
 ]
 
 [project.scripts]
@@ -31,7 +31,7 @@ venvPath = "."
 venv = ".venv"
 
 [tool.uv.sources]
-hikcamera = { url = "https://github.com/doubletry/HiKCamera/releases/download/v2.0.0/hikcamera-2.0.0-py3-none-any.whl" }
+hikcamera = { url = "https://github.com/doubletry/HiKCamera/releases/download/v2.1.1/hikcamera-2.1.1-py3-none-any.whl" }
 
 [dependency-groups]
 dev = [

@@ -111,6 +111,7 @@ class StreamCardView(QFrame):
     bitrate_edited      = Signal(str)
     source_reconnect_interval_edited = Signal(str)
     source_reconnect_max_attempts_edited = Signal(str)
+    hik_use_sdk_decode_toggled = Signal(bool)
     loop_toggled        = Signal(bool)
     preview_clicked      = Signal()
     title_edited        = Signal(str)
@@ -350,6 +351,23 @@ class StreamCardView(QFrame):
         row.addWidget(self._bitrate_input)
         row.addWidget(QLabel("M"))
 
+        # ── 海康相机专用选项（仅 hikcamera 源时显示）──
+        self._hik_options_container = QWidget()
+        hik_layout = QHBoxLayout(self._hik_options_container)
+        hik_layout.setContentsMargins(0, 0, 0, 0)
+        hik_layout.setSpacing(8)
+        hik_layout.addWidget(self._make_separator())
+        self._hik_use_sdk_decode_check = QCheckBox("使用相机内置 SDK 插值")
+        self._hik_use_sdk_decode_check.setChecked(True)
+        self._hik_use_sdk_decode_check.setToolTip(
+            "启用后由相机 SDK 完成 RAW→RGB（与之前 OpenCV 实现略有差异）；"
+            "关闭则回退到 OpenCV 解码。"
+        )
+        hik_layout.addWidget(self._hik_use_sdk_decode_check)
+        row.addWidget(self._hik_options_container)
+        # 默认隐藏（仅 hikcamera 源时显示）
+        self._hik_options_container.setVisible(False)
+
         # ── 重连配置（仅对 RTSP 视频源有效，其他源类型时隐藏）──
         self._reconnect_container = QWidget()
         reconnect_layout = QHBoxLayout(self._reconnect_container)
@@ -541,6 +559,9 @@ class StreamCardView(QFrame):
         self._source_reconnect_max_attempts_input.textChanged.connect(
             self.source_reconnect_max_attempts_edited.emit
         )
+        self._hik_use_sdk_decode_check.toggled.connect(
+            self.hik_use_sdk_decode_toggled.emit
+        )
         # 复选框
         self._loop_check.toggled.connect(self.loop_toggled.emit)
         # 预览按钮
@@ -572,6 +593,8 @@ class StreamCardView(QFrame):
 
         # 重连配置对 RTSP 源 和 海康相机 都有效（断线后会按相同机制重连）
         self._reconnect_container.setVisible(key in ("rtsp", "hikcamera"))
+        # 海康相机专用选项仅对 hikcamera 源显示
+        self._hik_options_container.setVisible(key == "hikcamera")
 
         # 恢复之前保存的源路径（而不是清空）
         self._source_input.blockSignals(True)
@@ -788,6 +811,14 @@ class StreamCardView(QFrame):
         self._loop_check.setChecked(val)
         self._loop_check.blockSignals(False)
 
+    def get_hik_use_sdk_decode(self) -> bool:
+        return self._hik_use_sdk_decode_check.isChecked()
+
+    def set_hik_use_sdk_decode(self, val: bool):
+        self._hik_use_sdk_decode_check.blockSignals(True)
+        self._hik_use_sdk_decode_check.setChecked(bool(val))
+        self._hik_use_sdk_decode_check.blockSignals(False)
+
     def set_preview_active(self, active: bool):
         """更新预览按钮文本以反映当前预览状态。"""
         self._preview_btn.setText("\u25a0 停止预览" if active else "\U0001f441 预览")
@@ -927,6 +958,7 @@ class StreamCardView(QFrame):
         self._bitrate_input.setReadOnly(read_only)
         self._source_reconnect_interval_input.setReadOnly(read_only)
         self._source_reconnect_max_attempts_input.setReadOnly(read_only)
+        self._hik_use_sdk_decode_check.setEnabled(not locked)
         self._config_locked = locked
         # 推流中时禁止编辑标题
         if locked:

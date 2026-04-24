@@ -518,6 +518,16 @@ class TestFFmpegWorkerInit:
         assert worker._hik_sn == "SN001"
         assert worker._hik_fps == 30
 
+    def test_hik_capture_use_sdk_decode_default_true(self):
+        worker = FFmpegWorker()
+        worker.set_hik_capture("SN001", 640, 480, 30)
+        assert worker._hik_use_sdk_decode is True
+
+    def test_hik_capture_use_sdk_decode_can_be_disabled(self):
+        worker = FFmpegWorker()
+        worker.set_hik_capture("SN001", 640, 480, 30, use_sdk_decode=False)
+        assert worker._hik_use_sdk_decode is False
+
     def test_start_preview_now_sets_state(self):
         worker = FFmpegWorker()
         with mock.patch.object(worker, "_start_preview"), \

@@ -91,6 +91,7 @@ class StreamController(QObject):
         self._preview_rtsp_url = ""
         self._source_reconnect_interval = 5
         self._source_reconnect_max_attempts = 0
+        self._hik_use_sdk_decode = True
 
         self._last_error = ""
         self._handled_worker_failure = False
@@ -126,6 +127,7 @@ class StreamController(QObject):
         c.bitrate_edited.connect(self._on_bitrate)
         c.source_reconnect_interval_edited.connect(self._on_source_reconnect_interval)
         c.source_reconnect_max_attempts_edited.connect(self._on_source_reconnect_max_attempts)
+        c.hik_use_sdk_decode_toggled.connect(self._on_hik_use_sdk_decode)
         c.loop_toggled.connect(self._on_loop)
         c.preview_clicked.connect(self.toggle_preview)
         c.title_edited.connect(self._on_title)
@@ -184,6 +186,9 @@ class StreamController(QObject):
 
     def _on_loop(self, val: bool):
         self._loop = val
+
+    def _on_hik_use_sdk_decode(self, val: bool):
+        self._hik_use_sdk_decode = bool(val)
 
     def _on_title(self, title: str):
         self._title = title
@@ -316,7 +321,10 @@ class StreamController(QObject):
             # 以保证 FFmpeg ``-video_size`` 与实际写入 stdin 的字节数严格对齐。
             try:
                 from ..services.hikcamera_capture import probe_hikcamera_size
-                pw, ph = probe_hikcamera_size(self._source_path)
+                pw, ph = probe_hikcamera_size(
+                    self._source_path,
+                    use_sdk_decode=self._hik_use_sdk_decode,
+                )
             except Exception as exc:
                 logger.warning(
                     "海康相机首帧探测失败 ch={} sn={} err={}",
@@ -389,7 +397,10 @@ class StreamController(QObject):
             except (TypeError, ValueError):
                 hw, hh = 0, 0
             fps = int(framerate or "30")
-            self._worker.set_hik_capture(self._source_path, hw, hh, fps)
+            self._worker.set_hik_capture(
+                self._source_path, hw, hh, fps,
+                use_sdk_decode=self._hik_use_sdk_decode,
+            )
 
         self._worker.status_changed.connect(self._on_worker_status)
         self._worker.error_occurred.connect(self._on_worker_error)
@@ -702,6 +713,7 @@ class StreamController(QObject):
             auto_start=self.is_streaming,
             source_reconnect_interval=self._source_reconnect_interval,
             source_reconnect_max_attempts=self._source_reconnect_max_attempts,
+            hik_use_sdk_decode=self._hik_use_sdk_decode,
         )
 
     def from_config(self, cfg: StreamConfig):
@@ -722,6 +734,7 @@ class StreamController(QObject):
         self._bitrate = cfg.bitrate
         self._source_reconnect_interval = cfg.source_reconnect_interval
         self._source_reconnect_max_attempts = cfg.source_reconnect_max_attempts
+        self._hik_use_sdk_decode = bool(cfg.hik_use_sdk_decode)
 
         card.set_source_path(cfg.source_path)
         card.set_stream_name(cfg.name)
@@ -733,12 +746,14 @@ class StreamController(QObject):
         card.set_bitrate(cfg.bitrate)
         card.set_source_reconnect_interval(cfg.source_reconnect_interval)
         card.set_source_reconnect_max_attempts(cfg.source_reconnect_max_attempts)
+        card.set_hik_use_sdk_decode(self._hik_use_sdk_decode)
 
         has_advanced = any([
             cfg.video_codec, cfg.width, cfg.height,
             cfg.framerate, cfg.bitrate,
             cfg.source_reconnect_interval != 5,
             cfg.source_reconnect_max_attempts != 0,
+            cfg.source_type == "hikcamera" and cfg.hik_use_sdk_decode is False,
         ])
         card.set_advanced_mode(has_advanced)
 
