@@ -368,7 +368,7 @@ class StreamCardView(QFrame):
         # 默认隐藏（仅 hikcamera 源时显示）
         self._hik_options_container.setVisible(False)
 
-        # ── 重连配置（仅对 RTSP 视频源有效，其他源类型时隐藏）──
+        # ── 重连配置（对 RTSP 和 hikcamera 视频源显示，其他源类型时隐藏）──
         self._reconnect_container = QWidget()
         reconnect_layout = QHBoxLayout(self._reconnect_container)
         reconnect_layout.setContentsMargins(0, 0, 0, 0)

@@ -48,19 +48,31 @@ def _make_even(v: int) -> int:
 
 
 def _apply_sdk_decode(cam, use_sdk_decode: bool) -> None:
-    """安全地调用 ``cam.set_use_sdk_decode(...)``，不存在该方法时静默忽略。
+    """调用 ``cam.set_use_sdk_decode(...)``。
 
-    依赖固定在 hikcamera v2.1.1，正常情况下方法存在；保留防御性回退是为了
-    在意外的旧 SDK 上避免 AttributeError 影响整条取流路径。
+    若当前 ``hikcamera`` 版本不存在该方法，则按兼容性回退静默跳过；若方法
+    存在但调用失败，则记录告警并继续上抛异常，避免用户显式配置被悄悄忽略。
     """
     setter = getattr(cam, "set_use_sdk_decode", None)
     if setter is None:
         logger.debug("当前 hikcamera 版本不支持 set_use_sdk_decode，跳过设置")
         return
+    serial_number = (
+        getattr(cam, "serial_number", None)
+        or getattr(cam, "sn", None)
+        or getattr(cam, "device_serial_number", None)
+        or "unknown"
+    )
     try:
         setter(bool(use_sdk_decode))
     except Exception as exc:  # noqa: BLE001
-        logger.debug("set_use_sdk_decode({}) 失败：{}", use_sdk_decode, exc)
+        logger.warning(
+            "相机 SN={} 调用 set_use_sdk_decode({}) 失败：{}",
+            serial_number,
+            use_sdk_decode,
+            exc,
+        )
+        raise
 
 
 def probe_hikcamera_size(

@@ -613,6 +613,21 @@ class TestStreamControllerState:
         ctrl.from_config(cfg)
         card.set_advanced_mode.assert_called_with(True)
 
+    def test_from_config_shows_advanced_when_hikcamera_sdk_decode_is_falsey(self):
+        """手动编辑/旧配置把值写成 0 时，也应按关闭处理并展开高级面板。"""
+        card = _make_mock_card()
+        ctrl = StreamController(
+            card=card, channel_index=0,
+            rtsp_server_getter=lambda: "", username_getter=lambda: "alice", machine_name_getter=lambda: "pc1", auth_secret_getter=lambda: "secret",
+        )
+        cfg = StreamConfig(
+            name="s1", source_type="hikcamera", source_path="SN001",
+            hik_use_sdk_decode=0,
+        )
+        ctrl.from_config(cfg)
+        assert ctrl._hik_use_sdk_decode is False
+        card.set_advanced_mode.assert_called_with(True)
+
     def test_channel_index(self):
         card = _make_mock_card()
         ctrl = StreamController(

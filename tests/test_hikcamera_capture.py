@@ -373,3 +373,21 @@ class TestUseSdkDecodePassthrough:
         _install_fake_hikcamera(lambda sn: _BareCamera(sn))
         # 不应抛错
         probe_hikcamera_size("SN001")
+
+    def test_probe_raises_when_set_use_sdk_decode_fails(self, fake_hikcamera):
+        class _BadCamera(_FakeCamera):
+            def set_use_sdk_decode(self, enable):  # noqa: ARG002
+                raise RuntimeError("sdk decode unavailable")
+
+        _install_fake_hikcamera(lambda sn: _BadCamera(sn))
+        with mock.patch(
+            "beaverpush.services.hikcamera_capture.logger.warning"
+        ) as mock_warning:
+            with pytest.raises(RuntimeError, match="打开海康相机失败"):
+                probe_hikcamera_size("SN001", use_sdk_decode=False)
+
+        mock_warning.assert_called_once()
+        args = mock_warning.call_args[0]
+        assert args[0] == "相机 SN={} 调用 set_use_sdk_decode({}) 失败：{}"
+        assert args[1] == "SN001"
+        assert args[2] is False

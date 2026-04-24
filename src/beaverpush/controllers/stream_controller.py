@@ -753,7 +753,7 @@ class StreamController(QObject):
             cfg.framerate, cfg.bitrate,
             cfg.source_reconnect_interval != 5,
             cfg.source_reconnect_max_attempts != 0,
-            cfg.source_type == "hikcamera" and cfg.hik_use_sdk_decode is False,
+            cfg.source_type == "hikcamera" and not self._hik_use_sdk_decode,
         ])
         card.set_advanced_mode(has_advanced)
 
