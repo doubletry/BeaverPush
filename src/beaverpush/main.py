@@ -33,6 +33,7 @@ from beaverpush.views.main_window import MainWindow
 from beaverpush.controllers.app_controller import AppController
 from beaverpush.services.log_service import setup_logging, logger
 from beaverpush.services.single_instance import SingleInstanceGuard
+from beaverpush.services import autostart_service
 
 
 def main():
@@ -72,8 +73,12 @@ def main():
     # ── 单实例激活信号 → 显示窗口 ──
     guard.activated.connect(controller._show_window)
 
-    # ── 显示窗口 ──
-    window.show()
+    # ── 显示窗口（开机自启时仅驻留托盘，不弹出主窗口）──
+    minimized = autostart_service.is_launched_minimized()
+    if minimized:
+        logger.info("检测到 --minimized，启动后驻留系统托盘")
+    else:
+        window.show()
 
     sys.exit(app.exec())
 

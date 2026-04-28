@@ -21,6 +21,7 @@ A multi-channel RTSP streaming desktop client built with **PySide6 + MVC archite
 - ✅ **Input validation** for username, machine name, and stream names (ASCII-safe characters only)
 - 🔄 **Auto-reconnect** with configurable interval for RTSP sources and Hikvision industrial cameras
 - 💾 **Auto-save on successful connection test**
+- 🚀 **Launch at startup** (Windows): when enabled, BeaverPush starts with the OS and auto-resumes the streams that were running last time
 
 ## Download
 

@@ -64,6 +64,7 @@ class TestAppConfig:
         assert cfg.auth_secret == ""
         assert cfg.server_reconnect_interval == 5
         assert cfg.server_reconnect_max_attempts == 0
+        assert cfg.launch_at_startup is False
         assert cfg.streams == []
 
     def test_config_dir_uses_beaverpush_name(self):
@@ -171,6 +172,27 @@ class TestConfigPersistence:
             assert cfg.username == ""
             assert cfg.machine_name == ""
             assert cfg.auth_secret == ""
+            assert cfg.launch_at_startup is False
+
+    def test_launch_at_startup_round_trip(self, tmp_path):
+        """``launch_at_startup`` 应能正确序列化与反序列化。"""
+        config_file = tmp_path / "config.json"
+        with mock.patch("beaverpush.models.config.CONFIG_FILE", config_file), \
+             mock.patch("beaverpush.models.config.CONFIG_DIR", tmp_path):
+            save_config(AppConfig(launch_at_startup=True))
+            loaded = load_config()
+            assert loaded.launch_at_startup is True
+
+    def test_load_legacy_without_launch_at_startup(self, tmp_path):
+        """旧配置文件缺少 ``launch_at_startup`` 字段时应回退为 False。"""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(
+            json.dumps({"rtsp_server": "rtsp://test:8554", "streams": []}),
+            encoding="utf-8",
+        )
+        with mock.patch("beaverpush.models.config.CONFIG_FILE", config_file):
+            loaded = load_config()
+        assert loaded.launch_at_startup is False
 
     def test_save_is_atomic_writes_via_tmp_file(self, tmp_path):
         """``save_config`` 必须先写 ``.tmp`` 再原子替换，

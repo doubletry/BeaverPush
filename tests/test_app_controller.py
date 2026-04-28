@@ -321,3 +321,131 @@ def test_loading_config_uses_bulk_start_queue(monkeypatch):
     finally:
         window.deleteLater()
         app.processEvents()
+
+
+# ==================================================================
+#  开机自启动（launch_at_startup）
+# ==================================================================
+
+def test_launch_at_startup_initial_sync_with_config(monkeypatch):
+    """启动期 AppController 应根据配置调用 autostart_service.sync 对账。"""
+    from beaverpush.services import autostart_service
+
+    monkeypatch.setattr(
+        app_ctrl_module, "load_config", lambda: AppConfig(launch_at_startup=True)
+    )
+    monkeypatch.setattr(app_ctrl_module, "save_config", lambda cfg: None)
+    monkeypatch.setattr(AppController, "_detect_and_apply_codecs", lambda self: None)
+
+    sync_calls: list[bool] = []
+    monkeypatch.setattr(autostart_service, "is_supported", lambda: True)
+    monkeypatch.setattr(autostart_service, "sync", lambda enabled: sync_calls.append(enabled) or True)
+
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    try:
+        ctrl = AppController(window, app)
+        # 应当调用一次 sync(True) 把注册表与配置对齐
+        assert sync_calls == [True]
+        # UI 状态同步
+        assert window.get_launch_at_startup() is True
+        assert ctrl._launch_at_startup is True
+    finally:
+        window.deleteLater()
+        app.processEvents()
+
+
+def test_launch_at_startup_initial_sync_failure_reverts_ui_and_status(monkeypatch):
+    """启动期对账失败时应回滚 UI/内存状态，并提示用户查看日志。"""
+    from beaverpush.services import autostart_service
+
+    monkeypatch.setattr(
+        app_ctrl_module, "load_config", lambda: AppConfig(launch_at_startup=True)
+    )
+    monkeypatch.setattr(app_ctrl_module, "save_config", lambda cfg: None)
+    monkeypatch.setattr(AppController, "_detect_and_apply_codecs", lambda self: None)
+    monkeypatch.setattr(autostart_service, "is_supported", lambda: True)
+    monkeypatch.setattr(autostart_service, "sync", lambda enabled: False)
+
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    try:
+        ctrl = AppController(window, app)
+        assert ctrl._launch_at_startup is False
+        assert ctrl._config.launch_at_startup is False
+        assert window.get_launch_at_startup() is False
+        assert window._status_label.text() == "开机自启动对账失败，请查看日志"
+    finally:
+        window.deleteLater()
+        app.processEvents()
+
+
+def test_toggle_launch_at_startup_persists_and_calls_service(monkeypatch):
+    """用户勾选/取消勾选时应调用 autostart_service.sync 并自动持久化。"""
+    from beaverpush.services import autostart_service
+
+    monkeypatch.setattr(app_ctrl_module, "load_config", lambda: AppConfig())
+    saves: list[AppConfig] = []
+    monkeypatch.setattr(app_ctrl_module, "save_config", lambda cfg: saves.append(cfg))
+    monkeypatch.setattr(AppController, "_detect_and_apply_codecs", lambda self: None)
+
+    sync_calls: list[bool] = []
+
+    def fake_sync(enabled: bool) -> bool:
+        sync_calls.append(enabled)
+        return True
+
+    monkeypatch.setattr(autostart_service, "is_supported", lambda: True)
+    monkeypatch.setattr(autostart_service, "sync", fake_sync)
+
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    try:
+        ctrl = AppController(window, app)
+        # 启动期会触发一次 sync(False)
+        sync_calls.clear()
+        saves.clear()
+
+        window.launch_at_startup_changed.emit(True)
+        assert sync_calls == [True]
+        assert ctrl._launch_at_startup is True
+        # 自动保存到 AppConfig 中
+        assert len(saves) == 1
+        assert saves[-1].launch_at_startup is True
+
+        window.launch_at_startup_changed.emit(False)
+        assert sync_calls == [True, False]
+        assert ctrl._launch_at_startup is False
+        assert saves[-1].launch_at_startup is False
+    finally:
+        window.deleteLater()
+        app.processEvents()
+
+
+def test_toggle_launch_at_startup_failure_reverts_ui(monkeypatch):
+    """sync 返回 False 时应回滚 checkbox，不改变内部状态，也不持久化。"""
+    from beaverpush.services import autostart_service
+
+    monkeypatch.setattr(app_ctrl_module, "load_config", lambda: AppConfig())
+    saves: list[AppConfig] = []
+    monkeypatch.setattr(app_ctrl_module, "save_config", lambda cfg: saves.append(cfg))
+    monkeypatch.setattr(AppController, "_detect_and_apply_codecs", lambda self: None)
+
+    monkeypatch.setattr(autostart_service, "is_supported", lambda: True)
+    monkeypatch.setattr(autostart_service, "sync", lambda enabled: False)
+
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    try:
+        ctrl = AppController(window, app)
+        saves.clear()
+
+        window.launch_at_startup_changed.emit(True)
+        # 内部状态仍为 False，UI 复原
+        assert ctrl._launch_at_startup is False
+        assert window.get_launch_at_startup() is False
+        # 失败时不应触发自动保存
+        assert saves == []
+    finally:
+        window.deleteLater()
+        app.processEvents()

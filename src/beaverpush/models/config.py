@@ -78,6 +78,7 @@ class AppConfig:
         username:        推流用户名（window-to-web 账户名，推流路径第一级）
         machine_name:    设备名（推流路径第二级，留空时使用主板 UUID）
         auth_secret:     认证授权码（密码或 API Key，会按当前设计明文保存在本地 config.json）
+        launch_at_startup: 是否随系统启动（仅 Windows，写入 ``HKCU\\...\\Run``）
         streams:         推流通道配置列表，每个元素为 :class:`StreamConfig` 的字典形式
     """
 
@@ -88,6 +89,7 @@ class AppConfig:
     auth_secret: str = ""
     server_reconnect_interval: int = 5
     server_reconnect_max_attempts: int = 0
+    launch_at_startup: bool = False
     streams: list[dict] = field(default_factory=list)
 
     def add_stream(self, cfg: StreamConfig):
@@ -129,6 +131,7 @@ def load_config() -> AppConfig:
                         data.get("server_reconnect_duration", 0),
                     ) or 0
                 ),
+                launch_at_startup=bool(data.get("launch_at_startup", False)),
                 streams=data.get("streams", []),
             )
         except Exception:

@@ -30,6 +30,7 @@ from ..services.device_service import (
 from ..services.ffmpeg_service import check_rtsp_server_reachable
 from ..services.connectivity_service import ConnectivityCheckWorker
 from ..services.encoder_probe import detect_available_encoders
+from ..services import autostart_service
 from ..views.main_window import MainWindow
 from ..views import stream_card as stream_card_module
 from ..views.stream_card import StreamCardView
@@ -68,6 +69,7 @@ class AppController(QObject):
         self._auth_secret = self._config.auth_secret
         self._server_reconnect_interval = self._config.server_reconnect_interval
         self._server_reconnect_max_attempts = self._config.server_reconnect_max_attempts
+        self._launch_at_startup = self._config.launch_at_startup
         self._controllers: list[StreamController] = []
         self._tray: QSystemTrayIcon | None = None
         self._test_worker: ConnectivityCheckWorker | None = None
@@ -105,6 +107,16 @@ class AppController(QObject):
             self._window.set_machine_name_placeholder(self._default_machine_name)
         self._window.set_server_reconnect_interval(self._server_reconnect_interval)
         self._window.set_server_reconnect_max_attempts(self._server_reconnect_max_attempts)
+        # 同步「开机自启动」UI 状态，并按平台支持情况禁用勾选框
+        self._window.set_launch_at_startup_supported(autostart_service.is_supported())
+        self._window.set_launch_at_startup(self._launch_at_startup)
+        # 启动期把注册表与本地配置对齐，自动修复用户卸载/换路径后残留的旧项
+        if autostart_service.is_supported():
+            if not autostart_service.sync(self._launch_at_startup):
+                self._launch_at_startup = False
+                self._config.launch_at_startup = False
+                self._window.set_launch_at_startup(False)
+                self._window.set_status("开机自启动对账失败，请查看日志")
 
         # 连接 View 信号 → Controller
         self._connect_signals()
@@ -131,6 +143,7 @@ class AppController(QObject):
         w.username_changed.connect(self._on_username_changed)
         w.machine_name_changed.connect(self._on_machine_name_changed)
         w.auth_secret_changed.connect(self._on_auth_secret_changed)
+        w.launch_at_startup_changed.connect(self._on_launch_at_startup_changed)
         # 全部开始/停止
         w.start_all_clicked.connect(self._on_start_all)
         w.stop_all_clicked.connect(self._on_stop_all)
@@ -163,6 +176,32 @@ class AppController(QObject):
 
     def _on_server_reconnect_max_attempts_changed(self, value: str):
         self._server_reconnect_max_attempts = self._parse_non_negative_int(value, 0)
+
+    def _on_launch_at_startup_changed(self, enabled: bool):
+        """用户切换「开机自启动」勾选框。
+
+        成功写入注册表后保存配置；失败则回滚 UI 并提示用户。
+        """
+        if not autostart_service.is_supported():
+            # 平台不支持，理论上 UI 已禁用，这里再兜一次
+            self._window.set_launch_at_startup(False)
+            self._window.set_status("当前平台不支持开机自启动")
+            return
+
+        ok = autostart_service.sync(enabled)
+        if not ok:
+            # 写入失败，恢复 checkbox 状态
+            self._window.set_launch_at_startup(self._launch_at_startup)
+            self._window.set_status(
+                "设置开机自启动失败，请查看日志" if enabled else "取消开机自启动失败，请查看日志"
+            )
+            return
+
+        self._launch_at_startup = enabled
+        self._window.set_status("已开启开机自启动" if enabled else "已关闭开机自启动")
+        # 自动持久化，避免下次启动后状态不一致
+        if not self._loading_config:
+            self.save_config(update_status=False)
 
     def _detect_and_apply_codecs(self):
         """异步在后台线程探测可用编码器并应用到 UI。
@@ -519,6 +558,7 @@ class AppController(QObject):
             auth_secret=self._auth_secret,
             server_reconnect_interval=self._server_reconnect_interval,
             server_reconnect_max_attempts=self._server_reconnect_max_attempts,
+            launch_at_startup=self._launch_at_startup,
             streams=[],
         )
         for ctrl in self._controllers:
