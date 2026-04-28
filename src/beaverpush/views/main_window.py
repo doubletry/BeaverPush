@@ -65,7 +65,8 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(900, 400)
 
         self._cards: list[StreamCardView] = []
-        # 是否支持开机自启动；这里先初始化为 True，Controller 启动期会再覆盖为实际平台支持状态
+        # 是否支持开机自启动。
+        # 这里先初始化为 True，Controller 启动期会再覆盖为实际平台支持状态。
         self._launch_at_startup_supported: bool = True
         self._build_ui()
 
