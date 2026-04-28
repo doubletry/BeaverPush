@@ -166,9 +166,31 @@ def test_set_launch_at_startup_supported_disables_checkbox():
     try:
         window.set_launch_at_startup_supported(False)
         assert not window._launch_at_startup_checkbox.isEnabled()
+        assert window._launch_at_startup_checkbox.toolTip() == "当前平台不支持开机自启动"
         # 即使解锁全局配置也不应启用（平台不支持）
         window.set_server_locked(False)
         assert not window._launch_at_startup_checkbox.isEnabled()
+    finally:
+        window.deleteLater()
+        app.processEvents()
+
+
+def test_set_launch_at_startup_supported_restores_enabled_and_tooltip():
+    """从不支持切回支持时，应恢复启用状态和默认 tooltip。"""
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    try:
+        window.set_server_locked(False)
+        window.set_launch_at_startup_supported(False)
+        assert not window._launch_at_startup_checkbox.isEnabled()
+        assert window._launch_at_startup_checkbox.toolTip() == "当前平台不支持开机自启动"
+
+        window.set_launch_at_startup_supported(True)
+        assert window._launch_at_startup_checkbox.isEnabled()
+        assert (
+            window._launch_at_startup_checkbox.toolTip()
+            == window._get_launch_at_startup_tooltip()
+        )
     finally:
         window.deleteLater()
         app.processEvents()

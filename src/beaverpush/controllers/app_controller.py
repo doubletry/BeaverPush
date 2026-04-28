@@ -112,7 +112,11 @@ class AppController(QObject):
         self._window.set_launch_at_startup(self._launch_at_startup)
         # 启动期把注册表与本地配置对齐，自动修复用户卸载/换路径后残留的旧项
         if autostart_service.is_supported():
-            autostart_service.sync(self._launch_at_startup)
+            if not autostart_service.sync(self._launch_at_startup):
+                self._launch_at_startup = False
+                self._config.launch_at_startup = False
+                self._window.set_launch_at_startup(False)
+                self._window.set_status("开机自启动对账失败，请查看日志")
 
         # 连接 View 信号 → Controller
         self._connect_signals()

@@ -42,7 +42,7 @@ MINIMIZED_FLAG = "--minimized"
 def is_supported() -> bool:
     """是否在当前平台支持开机自启动。
 
-    本应用只面向 Windows，其他平台返回 ``False``。
+    开机自启动功能仅 Windows 支持，其他平台返回 ``False``。
     """
     return sys.platform == "win32"
 

@@ -65,7 +65,7 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(900, 400)
 
         self._cards: list[StreamCardView] = []
-        # 是否支持开机自启动，默认按当前平台决定；Controller 启动期会再覆盖一次
+        # 是否支持开机自启动；这里先初始化为 True，Controller 启动期会再覆盖为实际平台支持状态
         self._launch_at_startup_supported: bool = True
         self._build_ui()
 
@@ -406,7 +406,7 @@ class MainWindow(QMainWindow):
         # 开机自启动（仅 Windows 生效，其他平台保持禁用）
         self._launch_at_startup_checkbox = QCheckBox("开机自启动")
         self._launch_at_startup_checkbox.setToolTip(
-            "勾选后系统启动时自动运行河狸推流，并恢复上次正在推流的通道"
+            self._get_launch_at_startup_tooltip()
         )
         self._launch_at_startup_checkbox.toggled.connect(
             self.launch_at_startup_changed.emit
@@ -490,11 +490,21 @@ class MainWindow(QMainWindow):
         """读取「开机自启动」勾选框的当前状态。"""
         return self._launch_at_startup_checkbox.isChecked()
 
+    def _get_launch_at_startup_tooltip(self) -> str:
+        """返回「开机自启动」勾选框在支持平台上的默认提示文案。"""
+        return "勾选后系统启动时自动运行河狸推流，并恢复上次正在推流的通道"
+
     def set_launch_at_startup_supported(self, supported: bool):
         """根据当前平台是否支持开机自启动来启用/禁用勾选框。"""
         self._launch_at_startup_supported = bool(supported)
-        if not supported:
-            self._launch_at_startup_checkbox.setEnabled(False)
+        self._launch_at_startup_checkbox.setEnabled(
+            supported and (not self.get_server_locked())
+        )
+        if supported:
+            self._launch_at_startup_checkbox.setToolTip(
+                self._get_launch_at_startup_tooltip()
+            )
+        else:
             self._launch_at_startup_checkbox.setToolTip("当前平台不支持开机自启动")
 
     def _build_scroll_area(self) -> QScrollArea:

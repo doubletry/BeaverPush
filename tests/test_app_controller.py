@@ -355,6 +355,31 @@ def test_launch_at_startup_initial_sync_with_config(monkeypatch):
         app.processEvents()
 
 
+def test_launch_at_startup_initial_sync_failure_reverts_ui_and_status(monkeypatch):
+    """启动期对账失败时应回滚 UI/内存状态，并提示用户查看日志。"""
+    from beaverpush.services import autostart_service
+
+    monkeypatch.setattr(
+        app_ctrl_module, "load_config", lambda: AppConfig(launch_at_startup=True)
+    )
+    monkeypatch.setattr(app_ctrl_module, "save_config", lambda cfg: None)
+    monkeypatch.setattr(AppController, "_detect_and_apply_codecs", lambda self: None)
+    monkeypatch.setattr(autostart_service, "is_supported", lambda: True)
+    monkeypatch.setattr(autostart_service, "sync", lambda enabled: False)
+
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    try:
+        ctrl = AppController(window, app)
+        assert ctrl._launch_at_startup is False
+        assert ctrl._config.launch_at_startup is False
+        assert window.get_launch_at_startup() is False
+        assert window._status_label.text() == "开机自启动对账失败，请查看日志"
+    finally:
+        window.deleteLater()
+        app.processEvents()
+
+
 def test_toggle_launch_at_startup_persists_and_calls_service(monkeypatch):
     """用户勾选/取消勾选时应调用 autostart_service.sync 并自动持久化。"""
     from beaverpush.services import autostart_service
