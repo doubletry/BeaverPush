@@ -58,6 +58,7 @@ def test_checkbox_indicator_renders_expected_theme_state(
 
     try:
         colors = _indicator_colors(checkbox)
+        assert colors
         assert max(colors, key=colors.get) == dominant_color
         assert (Theme.BASE.lower() in colors) is expect_checkmark
     finally:
