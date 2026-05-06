@@ -63,6 +63,7 @@ uv run pytest
 ```
 
 构建脚本使用 **Nuitka** 编译独立可执行文件（`dist/main.dist/BeaverPush.exe`），并通过 **Inno Setup** 生成安装包（`dist/BeaverPushSetup.exe`）。
+若要在本地生成安装包，还需要预先把 shared FFmpeg 构建放到项目 `ffmpeg/` 目录中（包含 `ffmpeg.exe`、`ffplay.exe`、`ffprobe.exe` 和所需的 `*.dll`）。CI 会在调用 `build.ps1` 前自动下载并整理这些文件。
 
 ## 使用说明
 

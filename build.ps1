@@ -55,6 +55,39 @@ function Convert-ToWindowsVersion {
     return ($parts -join ".")
 }
 
+function Get-MissingInstallerInputs {
+    param(
+        [string]$ProjectRoot,
+        [string]$ProductName
+    )
+
+    $ffmpegDir = Join-Path $ProjectRoot "ffmpeg"
+    $requiredPaths = @(
+        (Join-Path $ProjectRoot "dist\main.dist\$ProductName.exe")
+        (Join-Path $ffmpegDir "ffmpeg.exe")
+        (Join-Path $ffmpegDir "ffplay.exe")
+        (Join-Path $ffmpegDir "ffprobe.exe")
+    )
+    $missing = @()
+
+    foreach ($path in $requiredPaths) {
+        if (-not (Test-Path $path)) {
+            $missing += $path
+        }
+    }
+
+    if (-not (Test-Path $ffmpegDir)) {
+        return $missing
+    }
+
+    $ffmpegDlls = Get-ChildItem -Path $ffmpegDir -Filter "*.dll" -File -ErrorAction SilentlyContinue
+    if ($ffmpegDlls.Count -eq 0) {
+        $missing += "$ffmpegDir (缺少至少 1 个 shared FFmpeg DLL)"
+    }
+
+    return $missing
+}
+
 if ([string]::IsNullOrWhiteSpace($Version)) {
     $Version = Get-ProjectVersion -Path $PyprojectPath
 }
@@ -74,6 +107,7 @@ try {
         "--standalone"
         "--assume-yes-for-downloads"
         "--enable-plugin=pyside6"
+        "--disable-cache=ccache"
         "--windows-console-mode=disable"
         "--windows-product-name=$ProductName"
         "--output-filename=$ProductName.exe"
@@ -124,11 +158,14 @@ try {
     }
 
     # 查找 iscc.exe
-    $IsccPaths = @(
-        "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
-        "${env:ProgramFiles}\Inno Setup 6\ISCC.exe"
-        "${env:ProgramFiles(x86)}\Inno Setup 5\ISCC.exe"
-    )
+    $IsccPaths = @()
+    if (-not [string]::IsNullOrWhiteSpace(${env:ProgramFiles(x86)})) {
+        $IsccPaths += "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+        $IsccPaths += "${env:ProgramFiles(x86)}\Inno Setup 5\ISCC.exe"
+    }
+    if (-not [string]::IsNullOrWhiteSpace($env:ProgramFiles)) {
+        $IsccPaths += "${env:ProgramFiles}\Inno Setup 6\ISCC.exe"
+    }
     $Iscc = $null
     foreach ($p in $IsccPaths) {
         if (Test-Path $p) { $Iscc = $p; break }
@@ -143,6 +180,19 @@ try {
         Write-Host "[SKIP] 未找到 Inno Setup (iscc.exe), 跳过安装包生成" -ForegroundColor Yellow
         Write-Host "[TIP]  访问 https://jrsoftware.org/isinfo.php 下载安装 Inno Setup 6" -ForegroundColor Yellow
         Write-Host "[TIP]  安装后再次运行此脚本即可自动生成安装包" -ForegroundColor Yellow
+        exit 0
+    }
+
+    $missingInstallerInputs = Get-MissingInstallerInputs -ProjectRoot $ProjectRoot -ProductName $ProductName
+    if ($missingInstallerInputs.Count -gt 0) {
+        $requiredSharedFfmpegFiles = "ffmpeg.exe / ffplay.exe / ffprobe.exe / *.dll"
+        Write-Host ""
+        Write-Host "[SKIP] 缺少安装包生成所需文件，跳过 Inno Setup 打包" -ForegroundColor Yellow
+        foreach ($missingPath in $missingInstallerInputs) {
+            Write-Host "[MISS] $missingPath" -ForegroundColor Yellow
+        }
+        Write-Host "[TIP]  请先准备 dist\main.dist\$ProductName.exe 与 ffmpeg 目录中的 shared build（含 $requiredSharedFfmpegFiles）" -ForegroundColor Yellow
+        Write-Host "[TIP]  CI 会在调用 build.ps1 前自动下载并展开 FFmpeg；本地打包也需要同样的文件布局" -ForegroundColor Yellow
         exit 0
     }
 

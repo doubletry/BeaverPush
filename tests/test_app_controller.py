@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 
 import pytest
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QApplication
 
 from beaverpush.controllers import app_controller as app_ctrl_module
@@ -446,6 +447,52 @@ def test_toggle_launch_at_startup_failure_reverts_ui(monkeypatch):
         assert window.get_launch_at_startup() is False
         # 失败时不应触发自动保存
         assert saves == []
+    finally:
+        window.deleteLater()
+        app.processEvents()
+
+
+def test_setup_tray_skips_when_system_tray_unavailable(monkeypatch):
+    """无系统托盘时，setup_tray 应跳过初始化并返回 False。"""
+    monkeypatch.setattr(app_ctrl_module, "load_config", lambda: AppConfig())
+    monkeypatch.setattr(app_ctrl_module, "save_config", lambda cfg: None)
+    monkeypatch.setattr(AppController, "_detect_and_apply_codecs", lambda self: None)
+    monkeypatch.setattr(
+        app_ctrl_module.QSystemTrayIcon, "isSystemTrayAvailable", staticmethod(lambda: False),
+    )
+
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    try:
+        ctrl = AppController(window, app)
+        assert ctrl.setup_tray() is False
+        assert ctrl._tray is None
+    finally:
+        window.deleteLater()
+        app.processEvents()
+
+
+def test_close_event_quits_when_system_tray_missing(monkeypatch):
+    """没有系统托盘时，关闭窗口应直接退出而不是隐藏到托盘。"""
+    monkeypatch.setattr(app_ctrl_module, "load_config", lambda: AppConfig())
+    monkeypatch.setattr(app_ctrl_module, "save_config", lambda cfg: None)
+    monkeypatch.setattr(AppController, "_detect_and_apply_codecs", lambda self: None)
+
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    try:
+        ctrl = AppController(window, app)
+        cleanup_calls: list[str] = []
+        monkeypatch.setattr(
+            ctrl, "_cleanup_and_quit", lambda: cleanup_calls.append("quit"),
+        )
+
+        event = QCloseEvent()
+        ctrl._tray = None
+        ctrl._on_close(event)
+
+        assert event.isAccepted()
+        assert cleanup_calls == ["quit"]
     finally:
         window.deleteLater()
         app.processEvents()

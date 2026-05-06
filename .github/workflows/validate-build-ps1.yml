@@ -1,0 +1,143 @@
+name: Validate build.ps1
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    paths:
+      - 'build.ps1'
+      - 'installer.iss'
+      - 'pyproject.toml'
+      - '.github/workflows/build-release.yml'
+      - '.github/workflows/validate-build-ps1.yml'
+  workflow_dispatch:
+
+jobs:
+  validate-build-ps1:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Install dependencies
+        shell: pwsh
+        run: uv sync
+
+      - name: Download FFmpeg
+        shell: pwsh
+        run: |
+          $ffmpegVersion = "8.1"
+          $ffmpegReleaseRepo = "GyanD/codexffmpeg"
+          $ffmpegAssetName = "ffmpeg-$ffmpegVersion-full_build-shared.zip"
+          $ffmpegAssetSha256 = "e184e012ca9a3527ed45d61f8e250c50b07b8661d90849820ea754239049efb4"
+          $ffmpegUrl = "https://github.com/$ffmpegReleaseRepo/releases/download/$ffmpegVersion/$ffmpegAssetName"
+          $zipPath = "$env:RUNNER_TEMP\ffmpeg.zip"
+          $extractPath = "$env:RUNNER_TEMP\ffmpeg-extract"
+          $escapedFfmpegVersion = [regex]::Escape($ffmpegVersion)
+
+          if (Test-Path "ffmpeg") {
+            Remove-Item "ffmpeg" -Recurse -Force
+          }
+
+          Invoke-WebRequest -Uri $ffmpegUrl -OutFile $zipPath -UseBasicParsing
+
+          $actualZipSha256 = (Get-FileHash -Path $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualZipSha256 -ne $ffmpegAssetSha256) {
+            Write-Error "FFmpeg archive checksum mismatch. Expected $ffmpegAssetSha256, got $actualZipSha256"
+            exit 1
+          }
+
+          Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
+
+          $binDir = Get-ChildItem -Path $extractPath -Recurse -Directory -Filter "bin" | Select-Object -First 1
+          if (-not $binDir) {
+            Write-Error "FFmpeg bin directory not found"
+            exit 1
+          }
+
+          $versionLine = (& "$($binDir.FullName)\ffmpeg.exe" -version | Select-Object -First 1).Trim()
+          if ($versionLine -notmatch "^ffmpeg version (?:n)?$escapedFfmpegVersion(?:[\s-]|$)") {
+            Write-Error "Unexpected FFmpeg version. Expected $ffmpegVersion, got: $versionLine"
+            exit 1
+          }
+
+          $requiredFiles = @("ffmpeg.exe", "ffplay.exe", "ffprobe.exe")
+          foreach ($file in $requiredFiles) {
+            if (-not (Test-Path (Join-Path $binDir.FullName $file))) {
+              Write-Error "Required FFmpeg binary not found: $file"
+              exit 1
+            }
+          }
+
+          $dlls = Get-ChildItem -Path $binDir.FullName -Filter "*.dll" -File
+          if (-not $dlls) {
+            Write-Error "No FFmpeg shared DLLs were found in $($binDir.FullName)"
+            exit 1
+          }
+
+          New-Item -ItemType Directory -Path "ffmpeg" -Force | Out-Null
+          Copy-Item "$($binDir.FullName)\ffmpeg.exe" -Destination "ffmpeg\ffmpeg.exe"
+          Copy-Item "$($binDir.FullName)\ffplay.exe" -Destination "ffmpeg\ffplay.exe"
+          Copy-Item "$($binDir.FullName)\ffprobe.exe" -Destination "ffmpeg\ffprobe.exe"
+          Copy-Item "$($binDir.FullName)\*.dll" -Destination "ffmpeg\"
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          $isccPath = "${env:ProgramFiles(x86)}\Inno Setup 6"
+          echo "$isccPath" >> $env:GITHUB_PATH
+
+          $langDir = "$isccPath\Languages"
+          $islUrl = "https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/Unofficial/ChineseSimplified.isl"
+          Invoke-WebRequest -Uri $islUrl -OutFile "$langDir\ChineseSimplified.isl" -UseBasicParsing
+
+      - name: Run build.ps1 and assert clean Windows build log
+        shell: pwsh
+        run: |
+          $stdoutLog = "$env:RUNNER_TEMP\build-ps1.stdout.log"
+          $stderrLog = "$env:RUNNER_TEMP\build-ps1.stderr.log"
+          $combinedLog = "$env:RUNNER_TEMP\build-ps1.combined.log"
+          $pwshPath = (Get-Command pwsh).Source
+          $scriptPath = (Resolve-Path ".\build.ps1").Path
+
+          $proc = Start-Process -FilePath $pwshPath `
+            -ArgumentList "-NoLogo", "-NoProfile", "-File", $scriptPath, "-Version", "0.1.0" `
+            -Wait -PassThru `
+            -RedirectStandardOutput $stdoutLog `
+            -RedirectStandardError $stderrLog
+
+          if (Test-Path $stdoutLog) {
+            Get-Content $stdoutLog
+          }
+          if (Test-Path $stderrLog) {
+            Get-Content $stderrLog
+          }
+
+          $allLines = @()
+          foreach ($logPath in @($stdoutLog, $stderrLog)) {
+            if (Test-Path $logPath) {
+              $allLines += Get-Content $logPath
+            }
+          }
+          $allLines | Set-Content $combinedLog
+
+          if ($proc.ExitCode -ne 0) {
+            Write-Error "build.ps1 failed with exit code $($proc.ExitCode)"
+            exit $proc.ExitCode
+          }
+
+          if (Select-String -Path $combinedLog -SimpleMatch "The system cannot find the path specified.") {
+            Write-Error "build.ps1 output still contains 'The system cannot find the path specified.'"
+            exit 1
+          }

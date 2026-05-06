@@ -701,8 +701,13 @@ class AppController(QObject):
     #  系统托盘
     # ==================================================================
 
-    def setup_tray(self):
+    def setup_tray(self) -> bool:
         """创建并显示系统托盘图标和右键菜单。"""
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            logger.warning("当前环境不支持系统托盘，跳过托盘初始化")
+            self._tray = None
+            return False
+
         # 从 ico 文件加载后，补充系统托盘需要的小尺寸 pixmap
         icon = QIcon(APP_ICON_PATH)
         if not icon.isNull():
@@ -729,6 +734,7 @@ class AppController(QObject):
         self._tray.setContextMenu(menu)
         self._tray.activated.connect(self._on_tray_activated)
         self._tray.show()
+        return True
 
     def _on_tray_activated(self, reason: QSystemTrayIcon.ActivationReason):
         """双击托盘图标时显示主窗口。"""
@@ -752,15 +758,18 @@ class AppController(QObject):
         退出只能通过托盘右键菜单「退出」来触发。
         """
         self._cancel_bulk_start(update_status=False)
+        if not self._tray:
+            event.accept()
+            self._cleanup_and_quit()
+            return
         event.ignore()
         self._window.hide()
-        if self._tray:
-            self._tray.showMessage(
-                APP_NAME,
-                "窗口已最小化到托盘，双击图标可重新打开",
-                QSystemTrayIcon.MessageIcon.Information,
-                2000,
-            )
+        self._tray.showMessage(
+            APP_NAME,
+            "窗口已最小化到托盘，双击图标可重新打开",
+            QSystemTrayIcon.MessageIcon.Information,
+            2000,
+        )
 
     def _quit(self):
         """从托盘菜单触发的退出。"""

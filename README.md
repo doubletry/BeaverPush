@@ -63,6 +63,7 @@ Build a standalone executable and Windows installer:
 ```
 
 The build script uses **Nuitka** to compile a standalone executable (`dist/main.dist/BeaverPush.exe`) and **Inno Setup** to create the installer (`dist/BeaverPushSetup.exe`).
+For local installer packaging, also prepare a shared FFmpeg build in the project `ffmpeg/` directory (`ffmpeg.exe`, `ffplay.exe`, `ffprobe.exe`, and the required `*.dll` files). CI downloads and stages these files automatically before invoking `build.ps1`.
 
 ## Usage
 

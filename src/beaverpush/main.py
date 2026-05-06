@@ -68,7 +68,7 @@ def main():
 
     # ── 创建 Controller（自动加载配置、连接信号）──
     controller = AppController(window, app)  # noqa: F841
-    controller.setup_tray()
+    tray_available = controller.setup_tray()
 
     # ── 单实例激活信号 → 显示窗口 ──
     guard.activated.connect(controller._show_window)
@@ -76,7 +76,11 @@ def main():
     # ── 显示窗口（开机自启时仅驻留托盘，不弹出主窗口）──
     minimized = autostart_service.is_launched_minimized()
     if minimized:
-        logger.info("检测到 --minimized，启动后驻留系统托盘")
+        if tray_available:
+            logger.info("检测到 --minimized，启动后驻留系统托盘")
+        else:
+            logger.warning("检测到 --minimized，但当前环境不支持系统托盘，改为显示主窗口")
+            window.show()
     else:
         window.show()
 
