@@ -37,6 +37,13 @@ def test_minimized_start_shows_window_when_system_tray_unavailable(monkeypatch):
         def exec(self):
             return 0
 
+    class _FakeFont:
+        def __init__(self, *args, **kwargs):
+            self.point_size = None
+
+        def setPointSize(self, value):
+            self.point_size = value
+
     class _FakeSignal:
         def connect(self, callback):
             self.callback = callback
@@ -70,6 +77,8 @@ def test_minimized_start_shows_window_when_system_tray_unavailable(monkeypatch):
     warnings: list[str] = []
 
     monkeypatch.setattr(main_module, "QApplication", _FakeApp)
+    monkeypatch.setattr(main_module, "QFont", _FakeFont)
+    monkeypatch.setattr(main_module, "QIcon", lambda *args, **kwargs: object())
     monkeypatch.setattr(main_module, "SingleInstanceGuard", _FakeGuard)
     monkeypatch.setattr(main_module, "MainWindow", _FakeWindow)
     monkeypatch.setattr(main_module, "AppController", _FakeController)
