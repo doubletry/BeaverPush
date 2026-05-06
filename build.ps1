@@ -76,8 +76,13 @@ function Get-MissingInstallerInputs {
         }
     }
 
+    if (-not (Test-Path $ffmpegDir)) {
+        $missing += (Join-Path $ffmpegDir "*.dll")
+        return $missing
+    }
+
     $ffmpegDlls = Get-ChildItem -Path $ffmpegDir -Filter "*.dll" -File -ErrorAction SilentlyContinue
-    if (-not $ffmpegDlls) {
+    if ($ffmpegDlls.Count -eq 0) {
         $missing += (Join-Path $ffmpegDir "*.dll")
     }
 
@@ -180,12 +185,13 @@ try {
 
     $missingInstallerInputs = Get-MissingInstallerInputs -ProjectRoot $ProjectRoot -ProductName $ProductName
     if ($missingInstallerInputs.Count -gt 0) {
+        $requiredSharedFfmpegFiles = "ffmpeg.exe / ffplay.exe / ffprobe.exe / *.dll"
         Write-Host ""
         Write-Host "[SKIP] 缺少安装包生成所需文件，跳过 Inno Setup 打包" -ForegroundColor Yellow
         foreach ($missingPath in $missingInstallerInputs) {
             Write-Host "[MISS] $missingPath" -ForegroundColor Yellow
         }
-        Write-Host "[TIP]  请先准备 dist\main.dist\$ProductName.exe 与 ffmpeg 目录中的 shared build（含 ffmpeg.exe / ffplay.exe / ffprobe.exe / *.dll）" -ForegroundColor Yellow
+        Write-Host "[TIP]  请先准备 dist\main.dist\$ProductName.exe 与 ffmpeg 目录中的 shared build（含 $requiredSharedFfmpegFiles）" -ForegroundColor Yellow
         Write-Host "[TIP]  CI 会在调用 build.ps1 前自动下载并展开 FFmpeg；本地打包也需要同样的文件布局" -ForegroundColor Yellow
         exit 0
     }
