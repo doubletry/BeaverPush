@@ -73,11 +73,17 @@ Source: "{#MySourceDir}\ffmpeg\*.dll"; DestDir: "{app}\ffmpeg"; Flags: ignorever
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
-[Registry]
-; 应用内可勾选「开机自启动」时会写入 HKCU\...\Run\BeaverPush；
-; 卸载时连同清理，避免残留导致开机后启动失败。
-; 使用 dontcreatevalue 保证安装时不会强制创建该项，仅在卸载时清理。
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "BeaverPush"; Flags: uninsdeletevalue dontcreatevalue
-
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+// 应用内可勾选「开机自启动」时会写入 HKCU\...\Run\BeaverPush。
+// 安装器不在安装阶段创建该值，仅在卸载时做残留清理，避免用户卸载/换路径后
+// 系统启动仍尝试执行旧路径。
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usUninstall then
+  begin
+    RegDeleteValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', 'BeaverPush');
+  end;
+end;
