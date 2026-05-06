@@ -14,7 +14,7 @@ Catppuccin Mocha 深色主题
 
 from __future__ import annotations
 
-from .. import ASSETS_DIR as _ASSETS_DIR
+from .. import _qt_resources  # noqa: F401
 
 
 class Theme:
@@ -178,6 +178,8 @@ class Theme:
         QCheckBox::indicator {{
             width: 16px;
             height: 16px;
+        }}
+        QCheckBox::indicator:unchecked {{
             border: 1px solid {cls.SURFACE1};
             border-radius: {cls.RADIUS_SMALL}px;
             background-color: {cls.SURFACE0};
@@ -185,7 +187,16 @@ class Theme:
         QCheckBox::indicator:checked {{
             border-color: {cls.BLUE};
             background-color: {cls.BLUE};
-            image: url("{(_ASSETS_DIR / 'checkmark.svg').as_uri()}");
+            image: url(":/assets/checkmark.svg");
+        }}
+        QCheckBox::indicator:disabled {{
+            border-color: {cls.SURFACE0};
+            background-color: {cls.CRUST};
+        }}
+        QCheckBox::indicator:disabled:checked {{
+            border-color: {cls.SURFACE1};
+            background-color: {cls.OVERLAY1};
+            image: url(":/assets/checkmark.svg");
         }}
 
         /* ── 滚动区域 ── */
