@@ -60,7 +60,7 @@ def test_checkbox_indicator_renders_expected_theme_state(
         color_counts = _indicator_color_counts(checkbox)
         if not color_counts:
             pytest.fail("checkbox indicator did not render any pixels")
-        actual_dominant_color = max(color_counts, key=color_counts.get)
+        actual_dominant_color = max(color_counts, key=lambda color: color_counts[color])
         assert actual_dominant_color == dominant_color
         assert (Theme.BASE.lower() in color_counts) is expect_checkmark
     finally:
