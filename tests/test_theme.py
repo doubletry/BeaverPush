@@ -16,7 +16,7 @@ def test_checked_checkbox_renders_checkmark_from_qt_resource():
     app = QApplication.instance() or QApplication([])
     app.setStyleSheet(Theme.global_stylesheet())
 
-    checkbox = QCheckBox("演示")
+    checkbox = QCheckBox("demo")
     checkbox.setChecked(True)
     checkbox.resize(checkbox.sizeHint())
     checkbox.show()
