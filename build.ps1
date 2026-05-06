@@ -185,7 +185,7 @@ try {
         foreach ($missingPath in $missingInstallerInputs) {
             Write-Host "[MISS] $missingPath" -ForegroundColor Yellow
         }
-        Write-Host "[TIP]  请先准备 dist\main.dist\BeaverPush.exe 与 ffmpeg 目录中的 shared build（含 ffmpeg.exe / ffplay.exe / ffprobe.exe / *.dll）" -ForegroundColor Yellow
+        Write-Host "[TIP]  请先准备 dist\main.dist\$ProductName.exe 与 ffmpeg 目录中的 shared build（含 ffmpeg.exe / ffplay.exe / ffprobe.exe / *.dll）" -ForegroundColor Yellow
         Write-Host "[TIP]  CI 会在调用 build.ps1 前自动下载并展开 FFmpeg；本地打包也需要同样的文件布局" -ForegroundColor Yellow
         exit 0
     }
