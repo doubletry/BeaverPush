@@ -77,13 +77,12 @@ function Get-MissingInstallerInputs {
     }
 
     if (-not (Test-Path $ffmpegDir)) {
-        $missing += (Join-Path $ffmpegDir "*.dll")
         return $missing
     }
 
     $ffmpegDlls = Get-ChildItem -Path $ffmpegDir -Filter "*.dll" -File -ErrorAction SilentlyContinue
     if ($ffmpegDlls.Count -eq 0) {
-        $missing += (Join-Path $ffmpegDir "*.dll")
+        $missing += "$ffmpegDir (缺少至少 1 个 shared FFmpeg DLL)"
     }
 
     return $missing
