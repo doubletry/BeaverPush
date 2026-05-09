@@ -10,8 +10,8 @@ from beaverpush import main as main_module
 
 
 def test_main_declares_nuitka_ccache_disable_directive():
-    source = Path(main_module.__file__).read_text(encoding="utf-8-sig")
-    assert source.startswith("# nuitka-project: --disable-cache=ccache\n")
+    with Path(main_module.__file__).open(encoding="utf-8-sig") as f:
+        assert f.readline() == "# nuitka-project: --disable-cache=ccache\n"
 
 
 def test_minimized_start_shows_window_when_system_tray_unavailable(monkeypatch):
