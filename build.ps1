@@ -119,7 +119,7 @@ function New-CmdNoAutoRunWrapper {
 @'
 @echo off
 "%SystemRoot%\System32\cmd.exe" /d %*
-'@ | Set-Content -Path $wrapperPath -Encoding utf8 -NoNewline:$false
+'@ | Set-Content -Path $wrapperPath -Encoding utf8
     return $wrapperPath
 }
 

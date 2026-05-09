@@ -115,7 +115,7 @@ jobs:
           New-Item -Path $autoRunKey -Force | Out-Null
           # Deliberately point AutoRun at a missing file so cmd.exe would emit
           # "The system cannot find the path specified." unless build.ps1 disables AutoRun.
-          New-ItemProperty -Path $autoRunKey -Name AutoRun -Value "call `"$env:RUNNER_TEMP\\missing-build-hook.cmd`"" -PropertyType String -Force | Out-Null
+          New-ItemProperty -Path $autoRunKey -Name AutoRun -Value "call `"$env:RUNNER_TEMP\missing-build-hook.cmd`"" -PropertyType String -Force | Out-Null
 
           try {
             $proc = Start-Process -FilePath $pwshPath `
