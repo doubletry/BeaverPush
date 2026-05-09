@@ -110,25 +110,12 @@ jobs:
           $combinedLog = "$env:RUNNER_TEMP\build-ps1.combined.log"
           $pwshPath = (Get-Command pwsh).Source
           $scriptPath = (Resolve-Path ".\build.ps1").Path
-          $autoRunKey = "HKCU:\Software\Microsoft\Command Processor"
-          $missingAutoRunHook = Join-Path $env:RUNNER_TEMP ("missing-build-hook-" + [guid]::NewGuid().ToString("N") + ".cmd")
-          $autoRunValue = "call `"$missingAutoRunHook`""
 
-          New-Item -Path $autoRunKey -Force | Out-Null
-          # Deliberately point AutoRun at a missing file so cmd.exe would emit
-          # "The system cannot find the path specified." unless build.ps1 disables AutoRun.
-          New-ItemProperty -Path $autoRunKey -Name AutoRun -Value $autoRunValue -PropertyType String -Force | Out-Null
-
-          try {
-            $proc = Start-Process -FilePath $pwshPath `
-              -ArgumentList "-NoLogo", "-NoProfile", "-File", $scriptPath, "-Version", "0.1.0" `
-              -Wait -PassThru `
-              -RedirectStandardOutput $stdoutLog `
-              -RedirectStandardError $stderrLog
-          }
-          finally {
-            Remove-ItemProperty -Path $autoRunKey -Name AutoRun -ErrorAction SilentlyContinue
-          }
+          $proc = Start-Process -FilePath $pwshPath `
+            -ArgumentList "-NoLogo", "-NoProfile", "-File", $scriptPath, "-Version", "0.1.0" `
+            -Wait -PassThru `
+            -RedirectStandardOutput $stdoutLog `
+            -RedirectStandardError $stderrLog
 
           if (Test-Path $stdoutLog) {
             Get-Content $stdoutLog
