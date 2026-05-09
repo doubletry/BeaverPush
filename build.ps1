@@ -111,6 +111,18 @@ function Sync-NuitkaBuildOutput {
     Copy-Item -Path $stagedMainDist -Destination $finalMainDist -Recurse -Force
 }
 
+function New-CmdNoAutoRunWrapper {
+    param([string]$Directory)
+
+    New-Item -ItemType Directory -Path $Directory -Force | Out-Null
+    $wrapperPath = Join-Path $Directory "cmd-no-autorun.cmd"
+    @'
+@echo off
+"%SystemRoot%\System32\cmd.exe" /d %*
+'@ | Set-Content -Path $wrapperPath -Encoding ascii
+    return $wrapperPath
+}
+
 if ([string]::IsNullOrWhiteSpace($Version)) {
     $Version = Get-ProjectVersion -Path $PyprojectPath
 }
@@ -119,6 +131,9 @@ $GeneratedVersionFile = (New-TemporaryFile).FullName
 Set-Content -Path $GeneratedVersionFile -Value $Version -Encoding utf8
 $StagingStamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $NuitkaStagingRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("beaverpush-nuitka-$StagingStamp-" + [guid]::NewGuid().ToString("N"))
+$CmdWrapperPath = New-CmdNoAutoRunWrapper -Directory $NuitkaStagingRoot
+$OriginalComSpec = $env:ComSpec
+$env:ComSpec = $CmdWrapperPath
 
 try {
     # ── 基本 参数 ──
@@ -157,6 +172,7 @@ try {
     Write-Host "[INFO] 入口文件:  $EntryPoint"
     Write-Host "[INFO] 输出目录:  $OutputDir"
     Write-Host "[INFO] Nuitka 暂存目录: $NuitkaOutputDir"
+    Write-Host "[INFO] CMD 包装器: $CmdWrapperPath"
     Write-Host "[INFO] 产品名称:  $ProductName"
     Write-Host "[INFO] 版本号:    $Version"
     Write-Host "[INFO] 安装器版本: $WindowsVersion"
@@ -246,6 +262,12 @@ try {
     }
 }
 finally {
+    if ($null -eq $OriginalComSpec) {
+        Remove-Item Env:ComSpec -ErrorAction SilentlyContinue
+    }
+    else {
+        $env:ComSpec = $OriginalComSpec
+    }
     if (Test-Path $NuitkaStagingRoot) {
         try {
             Remove-Item $NuitkaStagingRoot -Recurse -Force
