@@ -753,7 +753,7 @@ class StreamController(QObject):
         if reset_state:
             self._set_state(StreamState.IDLE)
 
-    def _cancel_hik_probe(self):
+    def _cancel_hik_probe(self) -> None:
         self._hik_probe_request_id += 1
         self._pending_hik_start_context = None
         self._clear_rtsp_urls()

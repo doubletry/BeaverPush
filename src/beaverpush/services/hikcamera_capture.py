@@ -45,6 +45,7 @@ import numpy as np
 
 from .log_service import logger
 
+# Windows-only subprocess flag；在非 Windows 平台会回退为 0。
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 DEFAULT_PROBE_PROCESS_TIMEOUT_SECONDS = 8.0
 
