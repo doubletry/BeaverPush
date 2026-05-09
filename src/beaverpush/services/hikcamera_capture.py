@@ -175,18 +175,18 @@ def _terminate_subprocess(proc: subprocess.Popen, grace_seconds: float = 0.5) ->
         return
     try:
         proc.terminate()
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("终止海康探测子进程失败 pid={} err={}", proc.pid, exc)
     deadline = time.monotonic() + max(0.0, grace_seconds)
     while time.monotonic() < deadline:
         if proc.poll() is not None:
             return
-        time.sleep(0.05)
+        time.sleep(0.02)
     if proc.poll() is None:
         try:
             proc.kill()
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("强制结束海康探测子进程失败 pid={} err={}", proc.pid, exc)
 
 
 def probe_hikcamera_size_isolated(
@@ -222,7 +222,7 @@ def probe_hikcamera_size_isolated(
             if time.monotonic() >= deadline:
                 _terminate_subprocess(proc)
                 raise TimeoutError("海康相机连接超时，探测进程未在限定时间内返回")
-            time.sleep(0.05)
+            time.sleep(0.02)
 
         stdout, stderr = proc.communicate()
     finally:

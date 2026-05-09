@@ -482,7 +482,6 @@ class StreamController(QObject):
         if not self._schedule_reconnect("source", friendly):
             self._set_state(StreamState.IDLE)
             self._card.show_error(friendly)
-        return
 
     def _start_worker(
         self,
