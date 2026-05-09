@@ -1,4 +1,5 @@
-﻿"""
+﻿# nuitka-project: --disable-cache=ccache
+"""
 RTSP 推流客户端入口
 ===================
 
