@@ -24,6 +24,10 @@ RTSP 推流客户端入口
 
 import sys
 
+if "--hik-probe-json" in sys.argv:
+    from beaverpush.services.hikcamera_capture import run_hikcamera_probe_cli
+    raise SystemExit(run_hikcamera_probe_cli(sys.argv[1:]))
+
 from PySide6.QtGui import QFont, QIcon
 from PySide6.QtWidgets import QApplication
 

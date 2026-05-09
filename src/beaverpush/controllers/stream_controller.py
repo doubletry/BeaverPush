@@ -24,6 +24,7 @@ from ..services.ffmpeg_service import (
     build_authenticated_rtsp_url,
 )
 from ..services.connectivity_service import ConnectivityCheckWorker
+from ..services.hikcamera_probe_service import HikCameraProbeWorker
 from ..services.device_service import probe_video_info, get_screen_refresh_rate, check_rtsp_reachable
 from ..views.stream_card import StreamCardView
 from ..services.log_service import logger
@@ -104,6 +105,9 @@ class StreamController(QObject):
         self._reconnect_timer.setSingleShot(True)
         self._reconnect_timer.timeout.connect(self._attempt_reconnect)
         self._preflight_worker: ConnectivityCheckWorker | None = None
+        self._hik_probe_worker: HikCameraProbeWorker | None = None
+        self._hik_probe_request_id = 0
+        self._pending_hik_start_context: dict[str, str | int] | None = None
 
         self._connect_card_signals()
 
@@ -287,8 +291,6 @@ class StreamController(QObject):
             self._set_state(StreamState.IDLE)
             self._card.show_error(str(exc))
             return
-        self._rtsp_url = masked_rtsp_url
-        self._preview_rtsp_url = rtsp_url
         codec = self._video_codec if self._video_codec != "自动" else ""
 
         width = self._width
@@ -316,29 +318,14 @@ class StreamController(QObject):
                 codec = "libx264"
             if not framerate:
                 framerate = "30"
-            # 通过 SDK 短暂打开相机抓一帧，确定真实 (W, H)。
-            # 海康相机的输出分辨率由相机自身参数决定，这里强制覆盖用户填写值，
-            # 以保证 FFmpeg ``-video_size`` 与实际写入 stdin 的字节数严格对齐。
-            try:
-                from ..services.hikcamera_capture import probe_hikcamera_size
-                pw, ph = probe_hikcamera_size(
-                    self._source_path,
-                    use_sdk_decode=self._hik_use_sdk_decode,
-                )
-            except Exception as exc:
-                logger.warning(
-                    "海康相机首帧探测失败 ch={} sn={} err={}",
-                    self._channel_index, self._source_path, exc,
-                )
-                friendly = f"海康相机打开失败：{exc}"
-                self._last_error = friendly
-                # 走源失联重连流程；若用户未启用重连则恢复 IDLE 并提示
-                if not self._schedule_reconnect("source", friendly):
-                    self._set_state(StreamState.IDLE)
-                    self._card.show_error(friendly)
-                return
-            width = str(pw)
-            height = str(ph)
+            self._start_hikcamera_probe(
+                rtsp_url=rtsp_url,
+                masked_rtsp_url=masked_rtsp_url,
+                codec=codec,
+                framerate=framerate,
+                bitrate=bitrate,
+            )
+            return
         elif self._source_type == "video":
             info = probe_video_info(self._source_path)
             if not codec and info.get("codec"):
@@ -374,6 +361,141 @@ class StreamController(QObject):
             self._set_state(StreamState.IDLE)
             self._card.show_error(str(e))
             return
+
+        self._start_worker(
+            cmd=cmd,
+            masked_rtsp_url=masked_rtsp_url,
+            preview_rtsp_url=rtsp_url,
+            width=width,
+            height=height,
+            framerate=framerate,
+        )
+
+    def _start_hikcamera_probe(
+        self,
+        *,
+        rtsp_url: str,
+        masked_rtsp_url: str,
+        codec: str,
+        framerate: str,
+        bitrate: str,
+    ) -> None:
+        self._cancel_hik_probe()
+        self._hik_probe_request_id += 1
+        request_id = self._hik_probe_request_id
+        self._pending_hik_start_context = {
+            "request_id": request_id,
+            "rtsp_url": rtsp_url,
+            "masked_rtsp_url": masked_rtsp_url,
+            "codec": codec,
+            "framerate": framerate,
+            "bitrate": bitrate,
+            "source_path": self._source_path,
+        }
+        worker = HikCameraProbeWorker(
+            self._source_path,
+            use_sdk_decode=self._hik_use_sdk_decode,
+            parent=self,
+        )
+        self._hik_probe_worker = worker
+        worker.probe_succeeded.connect(
+            lambda width, height, current=worker, rid=request_id: (
+                self._on_hik_probe_succeeded(current, rid, width, height)
+            )
+        )
+        worker.probe_failed.connect(
+            lambda message, current=worker, rid=request_id: (
+                self._on_hik_probe_failed(current, rid, message)
+            )
+        )
+        worker.finished.connect(worker.deleteLater)
+
+        state = StreamState.RECONNECTING if self._reconnect_reason else StreamState.STARTING
+        self._set_state(state, "正在连接海康相机...")
+        self._report_status(f"通道 {self._channel_index + 1} 正在连接海康相机")
+        worker.start()
+
+    def _on_hik_probe_succeeded(
+        self,
+        worker: HikCameraProbeWorker,
+        request_id: int,
+        width: int,
+        height: int,
+    ) -> None:
+        if worker is not self._hik_probe_worker:
+            return
+        context = self._pending_hik_start_context
+        if (
+            context is None
+            or context.get("request_id") != request_id
+            or self._stop_requested
+        ):
+            self._cancel_hik_probe()
+            return
+
+        self._cancel_hik_probe()
+        width_text = str(width)
+        height_text = str(height)
+
+        try:
+            cmd = build_ffmpeg_command(
+                source_type=self._source_type,
+                source_path=self._source_path,
+                rtsp_url=str(context["rtsp_url"]),
+                loop=self._loop,
+                video_codec=str(context["codec"]),
+                width=width_text,
+                height=height_text,
+                framerate=str(context["framerate"]),
+                bitrate=str(context["bitrate"]),
+            )
+        except ValueError as exc:
+            self._set_state(StreamState.IDLE)
+            self._card.show_error(str(exc))
+            return
+
+        self._start_worker(
+            cmd=cmd,
+            masked_rtsp_url=str(context["masked_rtsp_url"]),
+            preview_rtsp_url=str(context["rtsp_url"]),
+            width=width_text,
+            height=height_text,
+            framerate=str(context["framerate"]),
+        )
+
+    def _on_hik_probe_failed(
+        self,
+        worker: HikCameraProbeWorker,
+        request_id: int,
+        message: str,
+    ) -> None:
+        if worker is not self._hik_probe_worker:
+            return
+        context = self._pending_hik_start_context
+        if context is None or context.get("request_id") != request_id:
+            self._cancel_hik_probe()
+            return
+
+        self._cancel_hik_probe()
+        friendly = f"海康相机打开失败：{message}"
+        self._last_error = friendly
+        if not self._schedule_reconnect("source", friendly):
+            self._set_state(StreamState.IDLE)
+            self._card.show_error(friendly)
+        return
+
+    def _start_worker(
+        self,
+        *,
+        cmd: list[str],
+        masked_rtsp_url: str,
+        preview_rtsp_url: str,
+        width: str,
+        height: str,
+        framerate: str,
+    ) -> None:
+        self._rtsp_url = masked_rtsp_url
+        self._preview_rtsp_url = preview_rtsp_url
 
         self._handled_worker_failure = False
         self._worker = FFmpegWorker(self)
@@ -506,6 +628,11 @@ class StreamController(QObject):
             self._report_status(f"通道 {self._channel_index + 1} 已取消启动")
             self._set_state(StreamState.IDLE)
             return
+        if self._hik_probe_worker:
+            self._cancel_hik_probe()
+            self._report_status(f"通道 {self._channel_index + 1} 已取消启动")
+            self._set_state(StreamState.IDLE)
+            return
         if self._reconnect_timer.isActive():
             self._cancel_reconnect()
             return
@@ -523,6 +650,10 @@ class StreamController(QObject):
         if self._preflight_worker:
             self._preflight_worker.stop()
             self._preflight_worker = None
+        if self._hik_probe_worker:
+            worker = self._hik_probe_worker
+            self._cancel_hik_probe()
+            worker.wait(1000)
         self._cancel_reconnect(reset_state=False)
         if self._worker and self._worker.isRunning():
             self._worker.stop()
@@ -622,6 +753,15 @@ class StreamController(QObject):
         self._reconnect_reason = None
         if reset_state:
             self._set_state(StreamState.IDLE)
+
+    def _cancel_hik_probe(self):
+        self._hik_probe_request_id += 1
+        self._pending_hik_start_context = None
+        self._clear_rtsp_urls()
+        worker = self._hik_probe_worker
+        self._hik_probe_worker = None
+        if worker:
+            worker.stop()
 
     def _classify_reconnect_reason(self, msg: str) -> str | None:
         lower = msg.lower()

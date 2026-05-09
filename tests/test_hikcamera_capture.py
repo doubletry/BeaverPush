@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 import types
 from unittest import mock
@@ -14,7 +15,7 @@ import numpy as np
 import pytest
 
 from beaverpush.services.hikcamera_capture import (
-    HikCameraFeeder, _make_even, probe_hikcamera_size,
+    HikCameraFeeder, _make_even, probe_hikcamera_size, run_hikcamera_probe_cli,
 )
 
 
@@ -391,3 +392,31 @@ class TestUseSdkDecodePassthrough:
         assert args[0] == "相机 SN={} 调用 set_use_sdk_decode({}) 失败：{}"
         assert args[1] == "SN001"
         assert args[2] is False
+
+
+class TestHikCameraProbeCli:
+    def test_probe_cli_returns_json_success(self, fake_hikcamera, capsys):
+        frame = np.zeros((721, 1281, 3), dtype=np.uint8)
+        _install_fake_hikcamera(lambda sn: _FakeCamera(sn, [frame]))
+
+        code = run_hikcamera_probe_cli([
+            "--hik-probe-json",
+            "--serial-number", "SN001",
+        ])
+
+        payload = json.loads(capsys.readouterr().out.strip())
+        assert code == 0
+        assert payload == {"ok": True, "width": 1282, "height": 722}
+
+    def test_probe_cli_returns_json_failure(self, fake_hikcamera, capsys):
+        _install_fake_hikcamera(lambda sn: _FakeCamera(sn))
+
+        code = run_hikcamera_probe_cli([
+            "--hik-probe-json",
+            "--serial-number", "",
+        ])
+
+        payload = json.loads(capsys.readouterr().out.strip())
+        assert code == 1
+        assert payload["ok"] is False
+        assert "海康相机 SN 不能为空" in payload["error"]

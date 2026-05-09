@@ -33,13 +33,20 @@
 
 from __future__ import annotations
 
+import argparse
+import json
 import subprocess
+import sys
 import threading
+import time
 from collections.abc import Callable
 
 import numpy as np
 
 from .log_service import logger
+
+CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+DEFAULT_PROBE_PROCESS_TIMEOUT_SECONDS = 8.0
 
 
 def _make_even(v: int) -> int:
@@ -137,6 +144,143 @@ def probe_hikcamera_size(
     if w <= 0 or h <= 0:
         raise RuntimeError(f"海康相机返回的画面尺寸非法：{w}x{h}")
     return _make_even(w), _make_even(h)
+
+
+class HikCameraProbeCancelled(RuntimeError):
+    """海康相机探测被主动取消。"""
+
+
+def _build_probe_subprocess_command(
+    serial_number: str,
+    timeout_ms: int,
+    *,
+    use_sdk_decode: bool,
+) -> list[str]:
+    cmd = [sys.executable]
+    is_frozen = bool(getattr(sys, "frozen", False))
+    if not is_frozen:
+        cmd.extend(["-m", "beaverpush.main"])
+    cmd.extend([
+        "--hik-probe-json",
+        "--serial-number", serial_number,
+        "--timeout-ms", str(timeout_ms),
+    ])
+    if not use_sdk_decode:
+        cmd.append("--no-sdk-decode")
+    return cmd
+
+
+def _terminate_subprocess(proc: subprocess.Popen, grace_seconds: float = 0.5) -> None:
+    if proc.poll() is not None:
+        return
+    try:
+        proc.terminate()
+    except Exception:
+        pass
+    deadline = time.monotonic() + max(0.0, grace_seconds)
+    while time.monotonic() < deadline:
+        if proc.poll() is not None:
+            return
+        time.sleep(0.05)
+    if proc.poll() is None:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+
+
+def probe_hikcamera_size_isolated(
+    serial_number: str,
+    timeout_ms: int = 3000,
+    *,
+    process_timeout_seconds: float = DEFAULT_PROBE_PROCESS_TIMEOUT_SECONDS,
+    use_sdk_decode: bool = True,
+    cancel_event: threading.Event | None = None,
+) -> tuple[int, int]:
+    """在独立子进程中探测海康相机尺寸，避免厂商 SDK 卡死主进程。"""
+    cmd = _build_probe_subprocess_command(
+        serial_number,
+        timeout_ms,
+        use_sdk_decode=use_sdk_decode,
+    )
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        creationflags=CREATE_NO_WINDOW,
+    )
+    deadline = time.monotonic() + max(0.1, process_timeout_seconds)
+
+    try:
+        while proc.poll() is None:
+            if cancel_event and cancel_event.is_set():
+                _terminate_subprocess(proc)
+                raise HikCameraProbeCancelled("海康相机探测已取消")
+            if time.monotonic() >= deadline:
+                _terminate_subprocess(proc)
+                raise TimeoutError("海康相机连接超时，探测进程未在限定时间内返回")
+            time.sleep(0.05)
+
+        stdout, stderr = proc.communicate()
+    finally:
+        if proc.poll() is None:
+            _terminate_subprocess(proc)
+
+    if cancel_event and cancel_event.is_set():
+        raise HikCameraProbeCancelled("海康相机探测已取消")
+
+    payload_text = (stdout or "").strip()
+    if not payload_text:
+        stderr_text = (stderr or "").strip()
+        if stderr_text:
+            raise RuntimeError(stderr_text.splitlines()[-1])
+        raise RuntimeError("海康相机探测进程未返回结果")
+
+    try:
+        payload = json.loads(payload_text)
+    except json.JSONDecodeError as exc:
+        stderr_text = (stderr or "").strip()
+        detail = stderr_text.splitlines()[-1] if stderr_text else payload_text
+        raise RuntimeError(f"海康相机探测结果解析失败：{detail}") from exc
+
+    if payload.get("ok") is True:
+        return int(payload["width"]), int(payload["height"])
+
+    error = str(payload.get("error") or "海康相机探测失败")
+    raise RuntimeError(error)
+
+
+def run_hikcamera_probe_cli(argv: list[str] | None = None) -> int:
+    """供主进程拉起的子进程调用，输出 JSON 探测结果。"""
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--hik-probe-json", action="store_true")
+    parser.add_argument("--serial-number", default="")
+    parser.add_argument("--timeout-ms", type=int, default=3000)
+    parser.add_argument("--no-sdk-decode", action="store_true")
+    args, _ = parser.parse_known_args(argv)
+
+    try:
+        width, height = probe_hikcamera_size(
+            args.serial_number,
+            timeout_ms=args.timeout_ms,
+            use_sdk_decode=not args.no_sdk_decode,
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(json.dumps({
+            "ok": False,
+            "error": str(exc),
+        }, ensure_ascii=False))
+        return 1
+
+    print(json.dumps({
+        "ok": True,
+        "width": width,
+        "height": height,
+    }, ensure_ascii=False))
+    return 0
 
 
 class HikCameraFeeder:
