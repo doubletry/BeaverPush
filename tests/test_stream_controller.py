@@ -955,12 +955,12 @@ class TestHikCameraSourceReconnect:
 
     def test_disconnect_schedules_source_reconnect(self):
         ctrl, _ = self._make_ctrl()
-        scheduled = ctrl._schedule_reconnect("source", "海康相机断开：cable unplugged")
+        with mock.patch.object(ctrl._reconnect_timer, "start") as mock_start:
+            scheduled = ctrl._schedule_reconnect("source", "海康相机断开：cable unplugged")
         assert scheduled is True
-        assert ctrl._reconnect_timer.isActive()
+        mock_start.assert_called_once_with(1000)
         assert ctrl._reconnect_reason == "source"
         assert ctrl._state == StreamState.RECONNECTING
-        ctrl._reconnect_timer.stop()
 
     def test_probe_failure_triggers_source_reconnect(self):
         ctrl, card = self._make_ctrl()
@@ -968,14 +968,15 @@ class TestHikCameraSourceReconnect:
         with mock.patch(
             "beaverpush.controllers.stream_controller.HikCameraProbeWorker",
             _ImmediateHikProbeWorker,
-        ):
+        ), mock.patch.object(
+            ctrl._reconnect_timer, "start"
+        ) as mock_start:
             ctrl._start_stream_impl(preflight=False)
             probe = _ImmediateHikProbeWorker.instances[0]
             probe.probe_failed.emit("device not found")
         # 重连计时器已启动，状态为 RECONNECTING；不应弹出 show_error
-        assert ctrl._reconnect_timer.isActive()
+        mock_start.assert_called_once_with(1000)
         assert ctrl._state == StreamState.RECONNECTING
-        ctrl._reconnect_timer.stop()
         card.show_error.assert_not_called()
 
     def test_probe_failure_without_reconnect_shows_error(self):
