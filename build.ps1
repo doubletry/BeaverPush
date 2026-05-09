@@ -111,6 +111,114 @@ function Sync-NuitkaBuildOutput {
     Copy-Item -Path $stagedMainDist -Destination $finalMainDist -Recurse -Force
 }
 
+function Initialize-NuitkaMsvcSconsCache {
+    param([string]$CachePath)
+
+    $pythonScript = @"
+from pathlib import Path
+import json
+import os
+import subprocess
+import sys
+
+import nuitka.build.SconsInterface as scons_interface
+
+lib_dir = Path(scons_interface.getSconsDataPath()) / "inline_copy" / "lib"
+scons_dirs = sorted(lib_dir.glob("scons-*"))
+if not scons_dirs:
+    raise SystemExit(0)
+
+sys.path.insert(0, str(scons_dirs[0]))
+
+from SCons.Environment import Environment
+from SCons.Tool.MSCommon import common, vc
+
+env = Environment(tools=[])
+version = vc.get_default_version(env)
+if version is None:
+    raise SystemExit(0)
+
+host_platform, target_platform, req_target_platform = vc.get_host_target(env)
+try_target_archs = [target_platform]
+
+if req_target_platform in ("amd64", "x86_64"):
+    try_target_archs.append("x86_amd64")
+elif not req_target_platform and target_platform in ("amd64", "x86_64"):
+    try_target_archs.extend(("x86_amd64", "x86"))
+
+script_path = None
+script_args = None
+
+for tp in try_target_archs:
+    env["TARGET_ARCH"] = tp
+    host_target = (host_platform, tp)
+
+    if not vc.is_host_target_supported(host_target, version):
+        continue
+
+    arg = vc._HOST_TARGET_ARCH_TO_BAT_ARCH[host_target]
+    major, _minor = vc.msvc_version_to_maj_min(version)
+    if major >= 14 and env.get("MSVC_UWP_APP") == "1":
+        arg += " store"
+
+    try:
+        vc_script, sdk_script = vc.find_batch_file(env, version, host_platform, tp)
+    except Exception:
+        continue
+
+    if vc_script:
+        script_path = vc_script
+        script_args = arg
+        break
+
+    if sdk_script:
+        script_path = sdk_script
+        script_args = None
+        break
+
+if script_path is None:
+    raise SystemExit(0)
+
+cmd_exe = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "cmd.exe")
+batch_call = f'call "{script_path}"'
+if script_args:
+    batch_call += f" {script_args}"
+
+result = subprocess.run(
+    [cmd_exe, "/d", "/s", "/c", batch_call + " >nul && set"],
+    stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE,
+    text=True,
+    encoding="mbcs",
+    errors="replace",
+    env=os.environ.copy(),
+)
+
+if result.returncode != 0:
+    sys.stderr.write(result.stderr)
+    raise SystemExit(result.returncode)
+
+cache_key = f"{script_path}--{script_args}"
+cache_value = common.parse_output(result.stdout)
+Path(r"$CachePath").write_text(
+    json.dumps({cache_key: cache_value}, indent=2),
+    encoding="utf-8",
+)
+print(r"$CachePath")
+"@
+
+    $output = uv run python -c $pythonScript
+    if ($LASTEXITCODE -ne 0) {
+        throw "预热 SCons MSVC 缓存失败，退出码: $LASTEXITCODE"
+    }
+
+    if ([string]::IsNullOrWhiteSpace($output)) {
+        return $null
+    }
+
+    return $output.Trim()
+}
+
 if ([string]::IsNullOrWhiteSpace($Version)) {
     $Version = Get-ProjectVersion -Path $PyprojectPath
 }
@@ -119,6 +227,7 @@ $GeneratedVersionFile = (New-TemporaryFile).FullName
 Set-Content -Path $GeneratedVersionFile -Value $Version -Encoding utf8
 $StagingStamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $NuitkaStagingRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("beaverpush-nuitka-$StagingStamp-" + [guid]::NewGuid().ToString("N"))
+$OriginalSconsCacheConfig = $env:SCONS_CACHE_MSVC_CONFIG
 
 try {
     # ── 基本 参数 ──
@@ -161,6 +270,17 @@ try {
     Write-Host "[INFO] 版本号:    $Version"
     Write-Host "[INFO] 安装器版本: $WindowsVersion"
     Write-Host ""
+
+    try {
+        $msvcSconsCachePath = Initialize-NuitkaMsvcSconsCache -CachePath (Join-Path $NuitkaStagingRoot "scons-msvc-cache.json")
+        if (-not [string]::IsNullOrWhiteSpace($msvcSconsCachePath)) {
+            $env:SCONS_CACHE_MSVC_CONFIG = $msvcSconsCachePath
+            Write-Host "[INFO] SCons MSVC 环境缓存: $msvcSconsCachePath" -ForegroundColor Cyan
+        }
+    }
+    catch {
+        Write-Warning "未能预热 SCons 的 MSVC 环境缓存，将回退到 Nuitka 默认探测：$_"
+    }
 
     # ── 执行编译 ──
     Write-Host "[BUILD] 开始编译..." -ForegroundColor Yellow
@@ -246,6 +366,12 @@ try {
     }
 }
 finally {
+    if ($null -eq $OriginalSconsCacheConfig) {
+        Remove-Item Env:SCONS_CACHE_MSVC_CONFIG -ErrorAction SilentlyContinue
+    }
+    else {
+        $env:SCONS_CACHE_MSVC_CONFIG = $OriginalSconsCacheConfig
+    }
     if (Test-Path $NuitkaStagingRoot) {
         try {
             Remove-Item $NuitkaStagingRoot -Recurse -Force
