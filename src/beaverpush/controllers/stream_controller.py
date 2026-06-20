@@ -25,7 +25,7 @@ from ..services.ffmpeg_service import (
 )
 from ..services.connectivity_service import ConnectivityCheckWorker
 from ..services.hikcamera_probe_service import HikCameraProbeWorker
-from ..services.device_service import probe_video_info, get_screen_refresh_rate, check_rtsp_reachable
+from ..services.device_service import probe_video_info, get_screen_refresh_rate, check_rtsp_reachable, get_camera_best_resolution
 from ..views.stream_card import StreamCardView
 from ..services.log_service import logger
 
@@ -311,8 +311,21 @@ class StreamController(QObject):
             if not framerate:
                 framerate = "30"
         elif self._source_type == "camera":
+            # [改进] 自动获取摄像头最高分辨率
+            # 目的：避免摄像头以默认低分辨率（640x480）打开
+            # 思路：调用 get_camera_best_resolution 解析 DirectShow 设备选项
+            #       优先选择 mjpeg 编码的最高分辨率（如 1920x1080）
             if not codec:
                 codec = "libx264"
+            if not framerate:
+                framerate = "30"
+            # 如果用户没有指定分辨率，自动获取摄像头最高分辨率
+            if not width or not height:
+                best_resolution = get_camera_best_resolution(self._source_path)
+                if best_resolution:
+                    width = str(best_resolution[0])
+                    height = str(best_resolution[1])
+                    logger.info("自动获取摄像头最高分辨率: {}x{}", width, height)
         elif self._source_type == "hikcamera":
             if not codec:
                 codec = "libx264"

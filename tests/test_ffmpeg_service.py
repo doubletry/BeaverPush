@@ -228,6 +228,66 @@ class TestBuildFfmpegCommandCamera:
         assert "dshow" in cmd
         assert "video=USB Camera" in cmd
 
+    def test_camera_uses_mjpeg_codec(self):
+        """[改进] 摄像头应使用 mjpeg 解码器以获得更高分辨率和帧率"""
+        cmd = build_ffmpeg_command(
+            source_type="camera",
+            source_path="USB Camera",
+            rtsp_url="rtsp://localhost:8554/c/s",
+            framerate="30",
+        )
+        assert "-vcodec" in cmd
+        vcodec_idx = cmd.index("-vcodec")
+        assert cmd[vcodec_idx + 1] == "mjpeg"
+
+    def test_camera_with_video_size(self):
+        """[改进] 摄像头支持通过 -video_size 指定分辨率"""
+        cmd = build_ffmpeg_command(
+            source_type="camera",
+            source_path="USB Camera",
+            rtsp_url="rtsp://localhost:8554/c/s",
+            width="1920",
+            height="1080",
+            framerate="30",
+        )
+        assert "-video_size" in cmd
+        size_idx = cmd.index("-video_size")
+        assert cmd[size_idx + 1] == "1920x1080"
+
+    def test_camera_dimensions_are_even(self):
+        """[改进] 摄像头分辨率应调整为偶数（FFmpeg 要求）"""
+        cmd = build_ffmpeg_command(
+            source_type="camera",
+            source_path="USB Camera",
+            rtsp_url="rtsp://localhost:8554/c/s",
+            width="1921",
+            height="1081",
+        )
+        assert "-video_size" in cmd
+        size_idx = cmd.index("-video_size")
+        assert cmd[size_idx + 1] == "1922x1082"
+
+    def test_camera_without_video_size(self):
+        """未指定分辨率时不添加 -video_size 参数"""
+        cmd = build_ffmpeg_command(
+            source_type="camera",
+            source_path="USB Camera",
+            rtsp_url="rtsp://localhost:8554/c/s",
+            framerate="30",
+        )
+        assert "-video_size" not in cmd
+
+    def test_camera_with_framerate(self):
+        cmd = build_ffmpeg_command(
+            source_type="camera",
+            source_path="USB Camera",
+            rtsp_url="rtsp://localhost:8554/c/s",
+            framerate="30",
+        )
+        assert "-framerate" in cmd
+        fr_idx = cmd.index("-framerate")
+        assert cmd[fr_idx + 1] == "30"
+
 
 class TestBuildFfmpegCommandUnsupported:
     def test_unsupported_type_raises(self):
@@ -671,6 +731,17 @@ class TestFriendlyError:
     def test_no_such_file(self):
         result = friendly_error("No such file or directory")
         assert "文件不存在" in result
+
+    def test_io_error(self):
+        """[改进] I/O 错误应显示摄像头相关的友好提示"""
+        result = friendly_error("Error opening input: I/O error")
+        assert "摄像头 I/O 错误" in result
+        assert "被其他程序占用" in result
+
+    def test_io_error_case_insensitive(self):
+        """[改进] I/O 错误检测应不区分大小写"""
+        result = friendly_error("i/o error occurred")
+        assert "摄像头 I/O 错误" in result
 
     def test_unknown_error_passthrough(self):
         result = friendly_error("some random message")
