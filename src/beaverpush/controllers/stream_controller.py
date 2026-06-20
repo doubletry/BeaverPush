@@ -28,6 +28,7 @@ from ..services.hikcamera_probe_service import HikCameraProbeWorker
 from ..services.device_service import probe_video_info, get_screen_refresh_rate, check_rtsp_reachable, get_camera_best_resolution
 from ..views.stream_card import StreamCardView
 from ..services.log_service import logger
+from ._utils import parse_positive_int, parse_non_negative_int
 
 # 用于识别“推流目标服务器异常”的 FFmpeg 错误关键词。
 SERVER_ERROR_KEYWORDS = (
@@ -183,10 +184,10 @@ class StreamController(QObject):
         self._bitrate = br
 
     def _on_source_reconnect_interval(self, value: str):
-        self._source_reconnect_interval = self._parse_positive_int(value, 5)
+        self._source_reconnect_interval = parse_positive_int(value, 5)
 
     def _on_source_reconnect_max_attempts(self, value: str):
-        self._source_reconnect_max_attempts = self._parse_non_negative_int(value, 0)
+        self._source_reconnect_max_attempts = parse_non_negative_int(value, 0)
 
     def _on_loop(self, val: bool):
         self._loop = val
@@ -908,22 +909,6 @@ class StreamController(QObject):
             cfg.source_type == "hikcamera" and not self._hik_use_sdk_decode,
         ])
         card.set_advanced_mode(has_advanced)
-
-    @staticmethod
-    def _parse_positive_int(value: str, default: int) -> int:
-        try:
-            parsed = int(value)
-        except (TypeError, ValueError):
-            return default
-        return parsed if parsed > 0 else default
-
-    @staticmethod
-    def _parse_non_negative_int(value: str, default: int) -> int:
-        try:
-            parsed = int(value)
-        except (TypeError, ValueError):
-            return default
-        return parsed if parsed >= 0 else default
 
     @staticmethod
     def _format_retry_status(label: str, interval: int, attempt: int) -> str:

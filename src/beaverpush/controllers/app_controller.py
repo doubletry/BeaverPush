@@ -36,6 +36,7 @@ from ..views import stream_card as stream_card_module
 from ..views.stream_card import StreamCardView
 from .stream_controller import StreamController
 from ..services.log_service import logger
+from ._utils import parse_positive_int, parse_non_negative_int
 
 BULK_START_INTERVAL_MS = 250
 MANUAL_BULK_START_INITIAL_DELAY_MS = 0
@@ -172,10 +173,10 @@ class AppController(QObject):
         self._auth_secret = secret
 
     def _on_server_reconnect_interval_changed(self, value: str):
-        self._server_reconnect_interval = self._parse_positive_int(value, 5)
+        self._server_reconnect_interval = parse_positive_int(value, 5)
 
     def _on_server_reconnect_max_attempts_changed(self, value: str):
-        self._server_reconnect_max_attempts = self._parse_non_negative_int(value, 0)
+        self._server_reconnect_max_attempts = parse_non_negative_int(value, 0)
 
     def _on_launch_at_startup_changed(self, enabled: bool):
         """用户切换「开机自启动」勾选框。
@@ -788,19 +789,3 @@ class AppController(QObject):
         if self._tray:
             self._tray.hide()
         self._app.quit()
-
-    @staticmethod
-    def _parse_positive_int(value: str, default: int) -> int:
-        try:
-            parsed = int(value)
-        except (TypeError, ValueError):
-            return default
-        return parsed if parsed > 0 else default
-
-    @staticmethod
-    def _parse_non_negative_int(value: str, default: int) -> int:
-        try:
-            parsed = int(value)
-        except (TypeError, ValueError):
-            return default
-        return parsed if parsed >= 0 else default
