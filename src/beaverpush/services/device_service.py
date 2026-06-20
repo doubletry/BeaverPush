@@ -106,6 +106,122 @@ def list_cameras() -> list[CameraInfo]:
     return cameras
 
 
+# [改进] 新增 get_camera_best_resolution 函数
+# 目的：自动获取摄像头最高分辨率，避免默认使用低分辨率
+# 思路：通过 FFmpeg -list_options 解析 DirectShow 设备支持的分辨率
+#       优先选择 mjpeg 编码（高分辨率下帧率更高，如 1920x1080@30fps）
+#       而 raw 编码（yuyv422）在高分辨率下帧率较低（如 1920x1080@5fps）
+def get_camera_best_resolution(device_name: str, timeout: int = 5) -> tuple[int, int, str] | None:
+    """获取摄像头支持的最高分辨率。
+
+    通过 FFmpeg 列出 DirectShow 设备的选项，解析出最高分辨率。
+    优先选择 mjpeg 编码格式，因为它可以在高分辨率下达到更高的帧率。
+
+    Args:
+        device_name: DirectShow 设备名称。
+        timeout: 超时秒数，默认 5 秒。
+
+    Returns:
+        ``(width, height, vcodec)`` 元组，如 ``(1920, 1080, "mjpeg")``。
+        获取失败时返回 ``None``。
+    """
+    from .ffmpeg_path import get_ffmpeg
+    import re
+
+    try:
+        result = subprocess.run(
+            [get_ffmpeg(), "-f", "dshow", "-list_options", "true", "-i", f"video={device_name}"],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            creationflags=CREATE_NO_WINDOW,
+        )
+        stderr = result.stderr
+
+        # 解析分辨率和编码格式
+        # 格式示例: pixel_format=yuyv422  min s=640x480 fps=30 max s=640x480 fps=30
+        # 格式示例: vcodec=mjpeg  min s=1920x1080 fps=25 max s=1920x1080 fps=30
+        best_mjpeg = None
+        best_mjpeg_area = 0
+        best_raw = None
+        best_raw_area = 0
+
+        for line in stderr.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+
+            # 提取分辨率
+            match = re.search(r'max s=(\d+)x(\d+)', line)
+            if not match:
+                continue
+
+            width = int(match.group(1))
+            height = int(match.group(2))
+            area = width * height
+
+            # 提取编码格式并分别记录
+            if "vcodec=mjpeg" in line:
+                if area > best_mjpeg_area:
+                    best_mjpeg_area = area
+                    best_mjpeg = (width, height, "mjpeg")
+            elif "pixel_format=yuyv422" in line:
+                if area > best_raw_area:
+                    best_raw_area = area
+                    best_raw = (width, height, "raw")
+
+        # 优先返回 mjpeg（高分辨率下帧率更高）
+        if best_mjpeg:
+            return best_mjpeg
+        return best_raw
+    except Exception:
+        return None
+
+
+def check_camera_available(device_name: str, timeout: int = 3) -> tuple[bool, str]:
+    """检测摄像头是否可用（未被其他程序占用）。
+
+    通过 FFmpeg 尝试打开摄像头 1 秒来判断是否可用。
+
+    Args:
+        device_name: DirectShow 设备名称。
+        timeout: 超时秒数，默认 3 秒。
+
+    Returns:
+        ``(available, message)`` 元组。``available`` 为是否可用，
+        ``message`` 为中文描述。
+    """
+    from .ffmpeg_path import get_ffmpeg
+    try:
+        result = subprocess.run(
+            [
+                get_ffmpeg(), "-y",
+                "-f", "dshow",
+                "-i", f"video={device_name}",
+                "-t", "1",
+                "-f", "null", "-",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            creationflags=CREATE_NO_WINDOW,
+        )
+        stderr = result.stderr.lower()
+        if "i/o error" in stderr:
+            return False, "摄像头 I/O 错误，可能被其他程序占用"
+        if "could not open" in stderr or "could not find" in stderr:
+            return False, "无法打开摄像头，可能被其他程序占用"
+        if result.returncode == 0:
+            return True, "摄像头可用"
+        return False, "摄像头不可用"
+    except subprocess.TimeoutExpired:
+        return False, "检测超时"
+    except FileNotFoundError:
+        return False, "未找到 ffmpeg"
+    except Exception as e:
+        return False, f"检测失败: {e}"
+
+
 def list_screens() -> list[ScreenInfo]:
     """列出系统所有显示器。
 

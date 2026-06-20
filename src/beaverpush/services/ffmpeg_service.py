@@ -578,7 +578,8 @@ class FFmpegWorker(QThread):
         error_keywords = [
             "connection refused", "no route to host",
             "connection timed out", "could not open",
-            "invalid data found", "server returned", "error",
+            "invalid data found", "server returned",
+            "i/o error", "error",  # [改进] 添加 i/o error 关键词检测
         ]
         line_lower = line.lower()
         if "frame=" in line_lower or "size=" in line_lower:
@@ -656,8 +657,18 @@ def build_ffmpeg_command(
         cmd += ["-re", "-i", source_path]
 
     elif source_type == "camera":
+        # [改进] 支持摄像头分辨率设置和 mjpeg 解码
+        # 目的：让摄像头以最高分辨率打开（默认 640x480 太低）
+        # 思路：通过 -video_size 指定分辨率，-vcodec mjpeg 指定输入解码器
+        #       mjpeg 编码在高分辨率下帧率更高（1920x1080@30fps vs yuyv422@5fps）
+        if width and height:
+            w = _make_even(int(width))
+            h = _make_even(int(height))
+            cmd += ["-video_size", f"{w}x{h}"]
         if framerate:
             cmd += ["-framerate", framerate]
+        # 指定 mjpeg 解码器，DirectShow 会优先选择 mjpeg 编码的高分辨率模式
+        cmd += ["-vcodec", "mjpeg"]
         cmd += ["-f", "dshow", "-i", f"video={source_path}"]
 
     elif source_type == "rtsp":
@@ -824,7 +835,11 @@ def friendly_error(msg: str) -> str:
         包含中文说明和原始信息的字符串。
     """
     lower = msg.lower()
+    # [改进] 添加 i/o error 的友好错误提示
+    # 目的：当摄像头打开失败时，显示更友好的中文提示信息
+    # 思路：在错误映射表中添加 "i/o error" 关键词及其对应的中文说明
     mapping = [
+        ("i/o error", "摄像头 I/O 错误，请检查摄像头是否被其他程序占用或连接是否正常。"),
         ("connection refused", "连接被拒绝，请检查 RTSP 服务器是否已启动。"),
         ("no route to host", "主机不可达，请检查网络连接。"),
         ("timed out", "连接超时，请检查网络。"),
