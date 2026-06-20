@@ -236,25 +236,28 @@ class TestCodecOptionsFiltering:
     """验证 set_available_codecs 按硬件探测结果裁剪下拉框。"""
 
     def test_default_includes_qsv_and_nvenc(self):
-        from beaverpush.views import stream_card as sc
+        from beaverpush.services.codec_registry import CodecRegistry
+        registry = CodecRegistry.instance()
+        codecs = registry.get_codecs()
         # 默认情况下全部候选都暴露给用户
-        assert "h264_qsv" in sc.CODEC_OPTIONS
-        assert "hevc_qsv" in sc.CODEC_OPTIONS
-        assert "h264_nvenc" in sc.CODEC_OPTIONS
+        assert "h264_qsv" in codecs
+        assert "hevc_qsv" in codecs
+        assert "h264_nvenc" in codecs
 
     def test_set_available_codecs_filters_unavailable_hardware(self):
-        from beaverpush.views import stream_card as sc
-        original = sc.CODEC_OPTIONS[:]
+        from beaverpush.services.codec_registry import CodecRegistry
+        registry = CodecRegistry.instance()
         try:
-            sc.set_available_codecs(["libx264", "libx265", "h264_qsv"])
+            registry.set_available(["libx264", "libx265", "h264_qsv"])
+            codecs = registry.get_codecs()
             # "自动" 与 "copy" 永远保留
-            assert "自动" in sc.CODEC_OPTIONS
-            assert "copy" in sc.CODEC_OPTIONS
-            assert "libx264" in sc.CODEC_OPTIONS
-            assert "h264_qsv" in sc.CODEC_OPTIONS
+            assert "自动" in codecs
+            assert "copy" in codecs
+            assert "libx264" in codecs
+            assert "h264_qsv" in codecs
             # 未探测到的硬件编码器应被裁剪
-            assert "h264_nvenc" not in sc.CODEC_OPTIONS
-            assert "hevc_qsv" not in sc.CODEC_OPTIONS
+            assert "h264_nvenc" not in codecs
+            assert "hevc_qsv" not in codecs
 
             # 新创建的卡片只展示裁剪后的列表
             app = QApplication.instance() or QApplication([])
@@ -268,7 +271,7 @@ class TestCodecOptionsFiltering:
                 card.deleteLater()
                 app.processEvents()
         finally:
-            sc.CODEC_OPTIONS = original
+            CodecRegistry.reset()
 
 
 class TestComboBoxWheelGuard:
@@ -312,14 +315,14 @@ class TestComboBoxWheelGuard:
             app.processEvents()
 
     def test_refresh_available_codecs_updates_existing_card_and_falls_back(self):
-        from beaverpush.views import stream_card as sc
-        original = sc.CODEC_OPTIONS[:]
+        from beaverpush.services.codec_registry import CodecRegistry
+        registry = CodecRegistry.instance()
         app = QApplication.instance() or QApplication([])
         try:
             card = StreamCardView(0)
             try:
                 card.set_codec("h264_qsv")
-                sc.set_available_codecs(["libx264", "libx265", "h264_nvenc"])
+                registry.set_available(["libx264", "libx265", "h264_nvenc"])
                 card.refresh_available_codecs()
                 items = [card._codec_combo.itemText(i)
                          for i in range(card._codec_combo.count())]
@@ -330,7 +333,7 @@ class TestComboBoxWheelGuard:
                 card.deleteLater()
                 app.processEvents()
         finally:
-            sc.CODEC_OPTIONS = original
+            CodecRegistry.reset()
 
 
 class TestPositionBadge:
