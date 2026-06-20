@@ -101,17 +101,24 @@ src/beaverpush/
 ├── main.py                      # Application entry point
 ├── models/
 │   ├── config.py                # JSON config persistence (AppConfig, StreamConfig)
-│   └── stream_model.py          # StreamState enum
+│   ├── stream_model.py          # StreamState enum
+│   └── source_type_plugin.py    # SourceTypePlugin Protocol + 6 built-in plugins
 ├── views/
 │   ├── theme.py                 # Catppuccin Mocha theme + QSS
 │   ├── stream_card.py           # Stream channel card widget
 │   └── main_window.py           # Main window (toolbar + scrollable card list)
 ├── controllers/
+│   ├── _utils.py                # Shared utility functions
 │   ├── app_controller.py        # App lifecycle, config, device enumeration
-│   └── stream_controller.py     # Single channel FFmpeg lifecycle
+│   ├── stream_controller.py     # Single channel FFmpeg lifecycle
+│   └── reconnect_policy.py      # Reconnection state machine
 └── services/
     ├── device_service.py        # Device enumeration (cameras/screens/windows)
-    ├── ffmpeg_service.py        # FFmpeg process management + command building
+    ├── ffmpeg_service.py        # Backward-compatible wrapper (imports from sub-modules)
+    ├── ffmpeg_command.py        # FFmpeg command building + error mapping
+    ├── ffmpeg_worker.py         # FFmpegWorker QThread process management
+    ├── rtsp_url.py              # RTSP URL construction + authentication
+    ├── codec_registry.py        # Codec availability registry (singleton)
     ├── ffmpeg_path.py           # FFmpeg executable path resolution
     ├── log_service.py           # Loguru-based logging
     └── window_capture.py        # Win32 window/screen capture (PrintWindow/BitBlt)
@@ -135,15 +142,16 @@ src/beaverpush/
        ▼                   ▼
 ┌───────────────────────────────────────────────┐
 │              Models + Services                 │
-│  config · stream_model · device_service        │
-│  ffmpeg_service · ffmpeg_path · window_capture │
+│  config · stream_model · source_type_plugin    │
+│  ffmpeg_command · ffmpeg_worker · rtsp_url     │
+│  codec_registry · device_service               │
 └───────────────────────────────────────────────┘
 ```
 
 - **Views** — UI rendering only; emit Qt signals for user actions
 - **Controllers** — Connect signals, call services, update views via `set_*` methods
 - **Services** — Pure business logic (FFmpeg process, device enumeration, window capture)
-- **Models** — Data structures and persistence
+- **Models** — Data structures, persistence, and plugin interfaces
 
 ## CI/CD
 
