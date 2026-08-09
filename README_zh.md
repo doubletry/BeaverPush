@@ -101,17 +101,24 @@ src/beaverpush/
 ├── main.py                      # 应用入口
 ├── models/
 │   ├── config.py                # JSON 配置持久化 (AppConfig, StreamConfig)
-│   └── stream_model.py          # StreamState 推流状态枚举
+│   ├── stream_model.py          # StreamState 推流状态枚举
+│   └── source_type_plugin.py    # SourceTypePlugin 协议 + 6 个内置插件
 ├── views/
 │   ├── theme.py                 # Catppuccin Mocha 主题 + QSS
 │   ├── stream_card.py           # 推流通道卡片组件
 │   └── main_window.py           # 主窗口（工具栏 + 滚动卡片列表）
 ├── controllers/
+│   ├── _utils.py                # 共享工具函数
 │   ├── app_controller.py        # 应用生命周期、配置管理、设备枚举
-│   └── stream_controller.py     # 单路推流 FFmpeg 生命周期管理
+│   ├── stream_controller.py     # 单路推流 FFmpeg 生命周期管理
+│   └── reconnect_policy.py      # 重连状态机
 └── services/
     ├── device_service.py        # 设备枚举（摄像头/屏幕/窗口）
-    ├── ffmpeg_service.py        # FFmpeg 进程管理 + 命令构建
+    ├── ffmpeg_service.py        # 向后兼容包装器（从子模块导入）
+    ├── ffmpeg_command.py        # FFmpeg 命令构建 + 错误映射
+    ├── ffmpeg_worker.py         # FFmpegWorker QThread 进程管理
+    ├── rtsp_url.py              # RTSP URL 构建 + 认证
+    ├── codec_registry.py        # 编码器可用性注册表（单例）
     ├── ffmpeg_path.py           # FFmpeg 可执行文件路径解析
     ├── log_service.py           # 基于 Loguru 的日志服务
     └── window_capture.py        # Win32 窗口/屏幕捕获 (PrintWindow/BitBlt)
@@ -135,15 +142,16 @@ src/beaverpush/
        ▼                   ▼
 ┌───────────────────────────────────────────────┐
 │              Models + Services                 │
-│  config · stream_model · device_service        │
-│  ffmpeg_service · ffmpeg_path · window_capture │
+│  config · stream_model · source_type_plugin    │
+│  ffmpeg_command · ffmpeg_worker · rtsp_url     │
+│  codec_registry · device_service               │
 └───────────────────────────────────────────────┘
 ```
 
 - **Views** — 仅负责 UI 展示，通过 Qt 信号通知用户操作
 - **Controllers** — 连接信号、调用 Services、通过 `set_*` 方法更新视图
 - **Services** — 封装纯业务逻辑（FFmpeg 进程、设备枚举、窗口捕获）
-- **Models** — 定义数据结构和持久化
+- **Models** — 定义数据结构、持久化和插件接口
 
 ## CI/CD
 

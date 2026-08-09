@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from .theme import Theme
+from ..services.codec_registry import CodecRegistry
 
 
 # ── 视频源类型常量（key → 显示文本）──
@@ -38,17 +39,6 @@ SOURCE_TYPES: list[tuple[str, str]] = [
     ("hikcamera", "海康工业相机"),
 ]
 
-# ── 编码器选项 ──
-# 默认包含全部可能的编码器；运行时由 :func:`set_available_codecs` 根据硬件
-# 探测结果裁剪（不可用的硬件编码器会被移除，避免用户选了之后启动失败）。
-ALL_CODEC_OPTIONS: list[str] = [
-    "自动", "copy",
-    "libx264", "libx265",
-    "h264_nvenc", "hevc_nvenc",
-    "h264_qsv", "hevc_qsv",
-]
-CODEC_OPTIONS: list[str] = ALL_CODEC_OPTIONS[:]
-
 
 class NoWheelComboBox(QComboBox):
     """忽略滚轮切换，避免滚动页面时误改下拉框选项。"""
@@ -60,16 +50,14 @@ class NoWheelComboBox(QComboBox):
         event.ignore()
 
 
+# 向后兼容：保留 set_available_codecs 函数，委托给 CodecRegistry
 def set_available_codecs(available: list[str]) -> None:
-    """根据硬件探测结果裁剪 :data:`CODEC_OPTIONS`。
+    """根据硬件探测结果裁剪编码器选项。
 
-    * 始终保留 ``"自动"`` 与 ``"copy"`` 两个非编码器选项。
-    * 顺序按 :data:`ALL_CODEC_OPTIONS` 原始顺序保留，便于下拉框稳定。
-    * 必须在创建 :class:`StreamCardView` 之前调用才能影响新建的卡片。
+    .. deprecated::
+        请使用 :class:`CodecRegistry.instance().set_available()` 替代。
     """
-    global CODEC_OPTIONS
-    keep = set(available) | {"自动", "copy"}
-    CODEC_OPTIONS = [c for c in ALL_CODEC_OPTIONS if c in keep]
+    CodecRegistry.instance().set_available(available)
 
 
 class StreamCardView(QFrame):
@@ -310,7 +298,7 @@ class StreamCardView(QFrame):
         row.addWidget(lbl)
         self._codec_combo = NoWheelComboBox()
         self._codec_combo.setFixedWidth(110)
-        self._codec_combo.addItems(CODEC_OPTIONS)
+        self._codec_combo.addItems(CodecRegistry.instance().get_codecs())
         row.addWidget(self._codec_combo)
 
         row.addWidget(self._make_separator())
@@ -709,26 +697,29 @@ class StreamCardView(QFrame):
             self._codec_combo.setCurrentIndex(idx)
 
     def refresh_available_codecs(self):
-        """把当前全局 ``CODEC_OPTIONS`` 同步到本卡片的编码器下拉框。
+        """把当前编码器可用性同步到本卡片的编码器下拉框。
 
         主要用于启动后异步完成硬件探测时，刷新那些已经创建好的卡片。
         若当前选中的编码器已被裁剪，则回退到 ``"自动"``（若存在），
         否则回退到下拉框第一个选项。
         """
+        registry = CodecRegistry.instance()
+        codecs = registry.get_codecs()
+
         current = self._codec_combo.currentText()
         items = [self._codec_combo.itemText(i) for i in range(self._codec_combo.count())]
-        if items == CODEC_OPTIONS:
+        if items == codecs:
             return
 
         fallback = current
-        if fallback not in CODEC_OPTIONS:
-            fallback = "自动" if "自动" in CODEC_OPTIONS else (
-                CODEC_OPTIONS[0] if CODEC_OPTIONS else ""
+        if fallback not in codecs:
+            fallback = "自动" if "自动" in codecs else (
+                codecs[0] if codecs else ""
             )
 
         self._codec_combo.blockSignals(True)
         self._codec_combo.clear()
-        self._codec_combo.addItems(CODEC_OPTIONS)
+        self._codec_combo.addItems(codecs)
         if fallback:
             idx = self._codec_combo.findText(fallback)
             if idx >= 0:

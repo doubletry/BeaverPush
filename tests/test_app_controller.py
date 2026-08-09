@@ -147,11 +147,10 @@ def test_move_blocked_when_streaming(controller):
 
 
 def test_apply_detected_codecs_refreshes_existing_cards(controller):
-    from beaverpush.views import stream_card as sc
+    from beaverpush.services.codec_registry import CodecRegistry
     ctrl, window, saves = controller
     a = ctrl.add_stream()
     b = ctrl.add_stream()
-    original = sc.CODEC_OPTIONS[:]
     try:
         a.card.set_codec("h264_qsv")
         b.card.set_codec("hevc_qsv")
@@ -167,7 +166,7 @@ def test_apply_detected_codecs_refreshes_existing_cards(controller):
         assert a.card.get_codec() == "自动"
         assert b.card.get_codec() == "自动"
     finally:
-        sc.CODEC_OPTIONS = original
+        CodecRegistry.reset()
 
 
 def test_async_codec_probe_refreshes_cards_created_before_probe(monkeypatch):
@@ -175,10 +174,10 @@ def test_async_codec_probe_refreshes_cards_created_before_probe(monkeypatch):
 
     之前实现是在 Python 工作线程里直接调用 ``QTimer.singleShot(0, ...)``，
     这在 PySide 下不会把回调投递到主线程事件循环，导致启动时先创建的卡片
-    永远保留默认 ``CODEC_OPTIONS``（含 QSV），Windows 用户就会继续看到
+    永远保留默认编码器列表（含 QSV），Windows 用户就会继续看到
     ``h264_qsv`` / ``hevc_qsv``。
     """
-    from beaverpush.views import stream_card as sc
+    from beaverpush.services.codec_registry import CodecRegistry
 
     monkeypatch.setattr(app_ctrl_module, "load_config", lambda: AppConfig())
     monkeypatch.setattr(app_ctrl_module, "save_config", lambda cfg: None)
@@ -194,7 +193,6 @@ def test_async_codec_probe_refreshes_cards_created_before_probe(monkeypatch):
 
     app = QApplication.instance() or QApplication([])
     window = MainWindow()
-    original = sc.CODEC_OPTIONS[:]
     try:
         ctrl = AppController(window, app)
         stream = ctrl.add_stream()
@@ -220,7 +218,7 @@ def test_async_codec_probe_refreshes_cards_created_before_probe(monkeypatch):
         assert "h264_nvenc" in items
         assert stream.card.get_codec() == "自动"
     finally:
-        sc.CODEC_OPTIONS = original
+        CodecRegistry.reset()
         window.deleteLater()
         app.processEvents()
 

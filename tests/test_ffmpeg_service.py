@@ -11,7 +11,7 @@ from beaverpush.services.ffmpeg_service import (
     check_rtsp_server_reachable, RTSP_TIMEOUT_US,
     _mask_sensitive_cmd,
 )
-from beaverpush.services import ffmpeg_service as _ffmpeg_service_mod
+from beaverpush.services import ffmpeg_command as _ffmpeg_command_mod
 
 
 @pytest.fixture(autouse=True)
@@ -19,12 +19,12 @@ def _force_nvenc_new_presets():
     """让 ``_low_latency_encode_args`` 在测试中固定走"新版 ffmpeg"分支
     （``-preset p1 -tune ll``），避免本机 PATH 上恰好是旧版 ffmpeg
     时让针对 nvenc 的断言飘忽不定。需要测旧版 fallback 的用例自行覆写。"""
-    original = _ffmpeg_service_mod._NVENC_NEW_PRESETS_CACHE
-    _ffmpeg_service_mod._NVENC_NEW_PRESETS_CACHE = True
+    original = _ffmpeg_command_mod._NVENC_NEW_PRESETS_CACHE
+    _ffmpeg_command_mod._NVENC_NEW_PRESETS_CACHE = True
     try:
         yield
     finally:
-        _ffmpeg_service_mod._NVENC_NEW_PRESETS_CACHE = original
+        _ffmpeg_command_mod._NVENC_NEW_PRESETS_CACHE = original
 
 
 class TestMakeEven:
@@ -117,7 +117,7 @@ class TestBuildFfmpegCommandScreen:
 class TestBuildFfmpegCommandWindow:
     def test_window_uses_rawvideo_pipe(self):
         with mock.patch(
-            "beaverpush.services.ffmpeg_service.get_window_rect",
+            "beaverpush.services.ffmpeg_command.get_window_rect",
             return_value=(0, 0, 800, 600),
         ):
             cmd = build_ffmpeg_command(
@@ -130,7 +130,7 @@ class TestBuildFfmpegCommandWindow:
 
     def test_window_uses_wallclock_timestamps(self):
         with mock.patch(
-            "beaverpush.services.ffmpeg_service.get_window_rect",
+            "beaverpush.services.ffmpeg_command.get_window_rect",
             return_value=(0, 0, 800, 600),
         ):
             cmd = build_ffmpeg_command(
@@ -439,7 +439,7 @@ class TestBuildFfmpegCommandScreenNoFilter:
 
     def test_window_no_scale_filter(self):
         with mock.patch(
-            "beaverpush.services.ffmpeg_service.get_window_rect",
+            "beaverpush.services.ffmpeg_command.get_window_rect",
             return_value=(0, 0, 800, 600),
         ):
             cmd = build_ffmpeg_command(
@@ -650,7 +650,7 @@ class TestFFmpegWorkerInit:
         mock_proc.stderr.read.return_value = b""
 
         with mock.patch(
-            "beaverpush.services.ffmpeg_service.subprocess.Popen",
+            "beaverpush.services.ffmpeg_worker.subprocess.Popen",
             return_value=mock_proc,
         ):
             worker.run()
@@ -675,7 +675,7 @@ class TestFFmpegWorkerInit:
         mock_proc.stderr.read.return_value = b""
 
         with mock.patch(
-            "beaverpush.services.ffmpeg_service.subprocess.Popen",
+            "beaverpush.services.ffmpeg_worker.subprocess.Popen",
             return_value=mock_proc,
         ):
             worker.run()
@@ -703,7 +703,7 @@ class TestFFmpegWorkerInit:
         mock_proc.stderr.read.return_value = b""
 
         with mock.patch(
-            "beaverpush.services.ffmpeg_service.subprocess.Popen",
+            "beaverpush.services.ffmpeg_worker.subprocess.Popen",
             return_value=mock_proc,
         ):
             worker.run()
@@ -752,7 +752,7 @@ class TestCheckRtspServerReachable:
     def test_success(self):
         completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
         with mock.patch(
-            "beaverpush.services.ffmpeg_service.subprocess.run",
+            "beaverpush.services.ffmpeg_command.subprocess.run",
             return_value=completed,
         ):
             ok, message = check_rtsp_server_reachable("rtsp://localhost:8554")
@@ -762,7 +762,7 @@ class TestCheckRtspServerReachable:
     def test_success_with_auth(self):
         completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
         with mock.patch(
-            "beaverpush.services.ffmpeg_service.subprocess.run",
+            "beaverpush.services.ffmpeg_command.subprocess.run",
             return_value=completed,
         ) as mock_run:
             ok, message = check_rtsp_server_reachable(
@@ -781,7 +781,7 @@ class TestCheckRtspServerReachable:
     def test_success_with_auth_normalizes_server_and_encodes_secret(self):
         completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
         with mock.patch(
-            "beaverpush.services.ffmpeg_service.subprocess.run",
+            "beaverpush.services.ffmpeg_command.subprocess.run",
             return_value=completed,
         ) as mock_run:
             ok, _ = check_rtsp_server_reachable(
@@ -796,7 +796,7 @@ class TestCheckRtspServerReachable:
 
     def test_invalid_server_returns_readable_error(self):
         with mock.patch(
-            "beaverpush.services.ffmpeg_service.subprocess.run",
+            "beaverpush.services.ffmpeg_command.subprocess.run",
         ) as mock_run:
             ok, message = check_rtsp_server_reachable("http://localhost:8554")
         assert ok is False
@@ -811,7 +811,7 @@ class TestCheckRtspServerReachable:
             stderr="Connection refused",
         )
         with mock.patch(
-            "beaverpush.services.ffmpeg_service.subprocess.run",
+            "beaverpush.services.ffmpeg_command.subprocess.run",
             return_value=completed,
         ):
             ok, message = check_rtsp_server_reachable("rtsp://localhost:8554")
@@ -826,7 +826,7 @@ class TestCheckRtspServerReachable:
             stderr="401 Unauthorized",
         )
         with mock.patch(
-            "beaverpush.services.ffmpeg_service.subprocess.run",
+            "beaverpush.services.ffmpeg_command.subprocess.run",
             return_value=completed,
         ):
             ok, message = check_rtsp_server_reachable(
@@ -867,7 +867,7 @@ class TestNvencLegacyPresetFallback:
 
     def test_uses_llhp_when_new_presets_unsupported(self, monkeypatch):
         monkeypatch.setattr(
-            _ffmpeg_service_mod, "_NVENC_NEW_PRESETS_CACHE", False,
+            _ffmpeg_command_mod, "_NVENC_NEW_PRESETS_CACHE", False,
         )
         for codec in ("h264_nvenc", "hevc_nvenc"):
             cmd = build_ffmpeg_command(
@@ -886,7 +886,7 @@ class TestNvencLegacyPresetFallback:
         """``_nvenc_supports_new_presets`` 必须只跑一次 ffmpeg 进程，
         以免每次构建命令都付出 100~300ms 的拉起开销。"""
         monkeypatch.setattr(
-            _ffmpeg_service_mod, "_NVENC_NEW_PRESETS_CACHE", None,
+            _ffmpeg_command_mod, "_NVENC_NEW_PRESETS_CACHE", None,
         )
         call_count = {"n": 0}
 
@@ -899,21 +899,21 @@ class TestNvencLegacyPresetFallback:
             )
 
         monkeypatch.setattr(
-            _ffmpeg_service_mod.subprocess, "run", fake_run,
+            _ffmpeg_command_mod.subprocess, "run", fake_run,
         )
-        assert _ffmpeg_service_mod._nvenc_supports_new_presets() is True
-        assert _ffmpeg_service_mod._nvenc_supports_new_presets() is True
+        assert _ffmpeg_command_mod._nvenc_supports_new_presets() is True
+        assert _ffmpeg_command_mod._nvenc_supports_new_presets() is True
         assert call_count["n"] == 1
 
     def test_probe_falls_back_to_old_when_ffmpeg_missing(self, monkeypatch):
         monkeypatch.setattr(
-            _ffmpeg_service_mod, "_NVENC_NEW_PRESETS_CACHE", None,
+            _ffmpeg_command_mod, "_NVENC_NEW_PRESETS_CACHE", None,
         )
 
         def boom(*args, **kwargs):
             raise FileNotFoundError("no ffmpeg")
 
         monkeypatch.setattr(
-            _ffmpeg_service_mod.subprocess, "run", boom,
+            _ffmpeg_command_mod.subprocess, "run", boom,
         )
-        assert _ffmpeg_service_mod._nvenc_supports_new_presets() is False
+        assert _ffmpeg_command_mod._nvenc_supports_new_presets() is False
