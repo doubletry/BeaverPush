@@ -24,6 +24,7 @@ from .. import APP_NAME, APP_ICON_PATH
 from ..models.config import (
     AppConfig, StreamConfig, load_config, save_config, load_stream_config,
 )
+from ..models.stream_model import StreamState
 from ..services.device_service import (
     list_cameras, list_screens, list_windows, get_motherboard_uuid,
 )
@@ -36,6 +37,7 @@ from ..views import stream_card as stream_card_module
 from ..views.stream_card import StreamCardView
 from .stream_controller import StreamController
 from ..services.log_service import logger
+from ..services.process_supervisor import process_supervisor
 from ._utils import parse_positive_int, parse_non_negative_int
 
 BULK_START_INTERVAL_MS = 250
@@ -78,6 +80,8 @@ class AppController(QObject):
         self._bulk_start_timer.setSingleShot(True)
         self._bulk_start_timer.timeout.connect(self._start_next_queued_stream)
         self._bulk_start_queue: list[StreamController] = []
+        self._bulk_retry_queue: list[StreamController] = []
+        self._bulk_start_active: StreamController | None = None
         self._bulk_start_total = 0
         self._bulk_start_started = 0
         # 加载配置过程中跳过自动保存，避免在恢复期间反复写盘。
@@ -360,6 +364,10 @@ class AppController(QObject):
             parent=self,
         )
         self._controllers.append(ctrl)
+        ctrl.set_start_scheduler(self._request_stream_start, self._cancel_stream_start)
+        ctrl.state_changed.connect(
+            lambda state, current=ctrl: self._on_bulk_stream_state_changed(current, state)
+        )
 
         # 设置流名称 placeholder 为下一个可用默认名称
         self._update_stream_name_placeholders()
@@ -634,6 +642,42 @@ class AppController(QObject):
             controller_ids=controller_ids,
         )
 
+    def _request_stream_start(
+        self, ctrl: StreamController, reconnect: bool = False,
+    ) -> None:
+        """Queue manual starts and reconnects behind the global startup slot."""
+        if ctrl not in self._controllers or ctrl is self._bulk_start_active:
+            return
+        if ctrl in self._bulk_start_queue or ctrl in self._bulk_retry_queue:
+            return
+        if reconnect:
+            self._bulk_retry_queue.append(ctrl)
+        elif not ctrl.is_streaming:
+            self._bulk_start_queue.append(ctrl)
+            self._bulk_start_total += 1
+        else:
+            return
+        logger.info(
+            "推流启动请求入队 ch={} reconnect={} pending={} retries={}",
+            ctrl.channel_index + 1, reconnect,
+            len(self._bulk_start_queue), len(self._bulk_retry_queue),
+        )
+        if self._bulk_start_active is None:
+            self._bulk_start_timer.start(0)
+
+    def _cancel_stream_start(self, ctrl: StreamController) -> None:
+        """Cancel one queued or in-flight startup without disturbing other channels."""
+        was_active = ctrl is self._bulk_start_active
+        self._bulk_start_queue = [item for item in self._bulk_start_queue if item is not ctrl]
+        self._bulk_retry_queue = [item for item in self._bulk_retry_queue if item is not ctrl]
+        if was_active:
+            self._bulk_start_active = None
+        if self._bulk_start_active is None:
+            if self._bulk_start_queue or self._bulk_retry_queue:
+                self._bulk_start_timer.start(0)
+            elif was_active:
+                self._finish_bulk_start()
+
     def _queue_bulk_start(
         self,
         controllers: list[StreamController],
@@ -656,24 +700,60 @@ class AppController(QObject):
 
     def _start_next_queued_stream(self):
         """启动队列中的下一路推流。"""
-        pending = self._get_pending_startable_controllers()
-        if not pending:
-            self._finish_bulk_start()
+        if self._bulk_start_active is not None:
             return
+        pending = self._get_pending_startable_controllers()
+        reconnect = False
+        if pending:
+            self._bulk_start_total = self._bulk_start_started + len(pending)
+            ctrl = pending[0]
+            self._bulk_start_queue = pending[1:]
+        else:
+            self._bulk_start_queue.clear()
+            self._bulk_retry_queue = [
+                item for item in self._bulk_retry_queue
+                if item in self._controllers and item._state != StreamState.STREAMING
+            ]
+            if not self._bulk_retry_queue:
+                self._finish_bulk_start()
+                return
+            ctrl = self._bulk_retry_queue.pop(0)
+            reconnect = True
 
-        self._bulk_start_total = self._bulk_start_started + len(pending)
-        ctrl = pending[0]
-        self._bulk_start_queue = pending[1:]
+        if (
+            ctrl._worker is not None
+            or ctrl._preflight_worker is not None
+            or ctrl._hik_probe_worker is not None
+        ):
+            queue = self._bulk_retry_queue if reconnect else self._bulk_start_queue
+            queue.append(ctrl)
+            self._bulk_start_timer.start(50)
+            return
+        self._bulk_start_active = ctrl
 
         current = self._bulk_start_started + 1
         self._window.set_status(
             f"批量启动中：正在启动第 {current}/{self._bulk_start_total} 路"
         )
-        ctrl.start_stream()
+        ctrl.run_scheduled_start(reconnect=reconnect)
         self._bulk_start_started += 1
 
-        if self._bulk_start_queue:
-            self._bulk_start_timer.start(BULK_START_INTERVAL_MS)
+    def _on_bulk_stream_state_changed(
+        self, ctrl: StreamController, state: object,
+    ) -> None:
+        """当前通道真正启动成功或明确失败后，才放行下一路。"""
+        if ctrl is not self._bulk_start_active:
+            return
+        if state not in (
+            StreamState.STREAMING,
+            StreamState.RECONNECTING,
+            StreamState.IDLE,
+            StreamState.ERROR,
+        ):
+            return
+        self._bulk_start_active = None
+        if self._bulk_start_queue or self._bulk_retry_queue:
+            self._bulk_start_timer.start(0)
         else:
             self._finish_bulk_start()
 
@@ -681,7 +761,9 @@ class AppController(QObject):
         """结束批量启动流程。"""
         started = self._bulk_start_started
         self._bulk_start_timer.stop()
+        self._bulk_start_active = None
         self._bulk_start_queue.clear()
+        self._bulk_retry_queue.clear()
         self._bulk_start_total = 0
         self._bulk_start_started = 0
         if started > 0:
@@ -689,9 +771,11 @@ class AppController(QObject):
 
     def _cancel_bulk_start(self, *, update_status: bool = True) -> int:
         """取消尚未发起的批量启动任务。"""
-        pending = len(self._bulk_start_queue)
+        pending = len(self._bulk_start_queue) + len(self._bulk_retry_queue)
         self._bulk_start_timer.stop()
         self._bulk_start_queue.clear()
+        self._bulk_retry_queue.clear()
+        self._bulk_start_active = None
         self._bulk_start_total = 0
         self._bulk_start_started = 0
         if pending > 0 and update_status:
@@ -786,6 +870,20 @@ class AppController(QObject):
         self.save_config()
         for ctrl in self._controllers:
             ctrl.force_stop()
+        process_supervisor.shutdown(timeout_seconds=5.0)
+        self._quit_after_processes_exit()
+
+    def _quit_after_processes_exit(self):
+        """Do not tear down Qt while an owned FFmpeg-family process survives."""
+        remaining = process_supervisor.active_count()
+        if remaining > 0:
+            logger.error(
+                "应用退出暂缓：仍有 {} 个受管子进程未退出",
+                remaining,
+            )
+            process_supervisor.shutdown(timeout_seconds=1.0)
+            QTimer.singleShot(250, self._quit_after_processes_exit)
+            return
         if self._tray:
             self._tray.hide()
         self._app.quit()

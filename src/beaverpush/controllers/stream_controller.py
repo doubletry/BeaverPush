@@ -73,7 +73,11 @@ class StreamController(QObject):
         self._server_reconnect_max_attempts_getter = server_reconnect_max_attempts_getter or (lambda: 0)
         self._status_reporter = status_reporter
         self._duplicate_name_checker = duplicate_name_checker
+        self._start_scheduler: Callable[[StreamController, bool], None] | None = None
+        self._start_canceller: Callable[[StreamController], None] | None = None
         self._worker: FFmpegWorker | None = None
+        self._worker_generation = 0
+        self._active_worker_generation = 0
         self._state = StreamState.IDLE
 
         self._source_type = card.get_source_type() or "video"
@@ -198,7 +202,29 @@ class StreamController(QObject):
     def _on_title(self, title: str):
         self._title = title
 
+    def set_start_scheduler(
+        self,
+        scheduler: Callable[[StreamController, bool], None] | None,
+        canceller: Callable[[StreamController], None] | None = None,
+    ) -> None:
+        """Route manual starts and reconnects through an application scheduler."""
+        self._start_scheduler = scheduler
+        self._start_canceller = canceller
+
     def start_stream(self):
+        if self._start_scheduler:
+            self._start_scheduler(self, False)
+            return
+        self.run_scheduled_start(False)
+
+    def run_scheduled_start(self, reconnect: bool = False) -> None:
+        """Execute a start after the application-wide startup slot is granted."""
+        if reconnect:
+            self._run_reconnect_attempt()
+            return
+        if self.is_streaming or self._worker or self._preflight_worker or self._hik_probe_worker:
+            logger.debug("忽略重复启动请求 ch={} state={}", self._channel_index, self._state.value)
+            return
         self._stop_requested = False
         self._cancel_reconnect(reset_state=False)
         self._source_retry_count = 0
@@ -264,7 +290,12 @@ class StreamController(QObject):
             self._card.show_error("请输入海康相机 SN")
             return
 
-        if preflight:
+        # Only RTSP inputs need a source preflight.  Publishing a one-second
+        # test stream to the target server for every channel created duplicate
+        # publishers on the shared ``__connection_test__`` path and doubled
+        # the RTSP authentication handshake.  The real FFmpeg publisher is the
+        # source of truth for target reachability and authentication.
+        if preflight and self._source_type == "rtsp":
             self._start_preflight_check(rtsp_server)
             return
 
@@ -507,24 +538,34 @@ class StreamController(QObject):
         height: str,
         framerate: str,
     ) -> None:
+        if self._worker is not None:
+            logger.warning("拒绝覆盖仍受管的推流 worker ch={}", self._channel_index)
+            return
         self._rtsp_url = masked_rtsp_url
         self._preview_rtsp_url = preview_rtsp_url
 
         self._handled_worker_failure = False
-        self._worker = FFmpegWorker(self)
-        self._worker.set_source_type(self._source_type)
-        self._worker.set_command(cmd)
+        self._worker_generation += 1
+        generation = self._worker_generation
+        self._active_worker_generation = generation
+        worker = FFmpegWorker(self)
+        self._worker = worker
+        worker.set_source_type(self._source_type)
+        worker.set_command(cmd)
+        worker.set_process_context(
+            f"channel={self._channel_index + 1} attempt={generation}"
+        )
         if self._source_type == "window" and self._source_path.startswith("hwnd:"):
             hwnd = int(self._source_path.split(":")[1])
             fps = int(framerate or "30")
-            self._worker.set_window_capture(hwnd, fps)
+            worker.set_window_capture(hwnd, fps)
         elif self._source_type == "screen" and self._source_path.startswith("offset:"):
             parts = self._source_path.split(":", 1)[1].split(",")
             if len(parts) == 4:
                 ox, oy = int(parts[0]), int(parts[1])
                 ow, oh = int(parts[2]), int(parts[3])
                 fps = int(framerate or "30")
-                self._worker.set_screen_capture(ox, oy, ow, oh, fps)
+                worker.set_screen_capture(ox, oy, ow, oh, fps)
         elif self._source_type == "hikcamera":
             try:
                 hw = int(width)
@@ -532,26 +573,45 @@ class StreamController(QObject):
             except (TypeError, ValueError):
                 hw, hh = 0, 0
             fps = int(framerate or "30")
-            self._worker.set_hik_capture(
+            worker.set_hik_capture(
                 self._source_path, hw, hh, fps,
                 use_sdk_decode=self._hik_use_sdk_decode,
             )
 
-        self._worker.status_changed.connect(self._on_worker_status)
-        self._worker.error_occurred.connect(self._on_worker_error)
-        self._worker.progress_info.connect(self._on_worker_progress)
-        self._worker.stopped.connect(self._on_worker_stopped)
-        self._worker.preview_closed.connect(self._on_preview_closed)
-        self._worker.start()
-
+        worker.status_changed.connect(
+            lambda status, current=worker, current_generation=generation: self._on_worker_status(
+                current, status, current_generation,
+            )
+        )
+        worker.error_occurred.connect(
+            lambda message, current=worker, current_generation=generation: self._on_worker_error(
+                current, message, current_generation,
+            )
+        )
+        worker.progress_info.connect(
+            lambda info, current=worker, current_generation=generation: self._on_worker_progress(
+                current, info, current_generation,
+            )
+        )
+        worker.stopped.connect(
+            lambda current=worker, current_generation=generation: self._on_worker_stopped(
+                current, current_generation,
+            )
+        )
+        worker.preview_closed.connect(
+            lambda current=worker, current_generation=generation: self._on_preview_closed(
+                current, current_generation,
+            )
+        )
+        self._report_status(f"通道 {self._channel_index + 1} 开始推流")
+        self._set_state(StreamState.STARTING)
         logger.info(
             "推流启动: ch={} url={} source={}/{}",
             self._channel_index, masked_rtsp_url, self._source_type, self._source_path
         )
-        self._report_status(f"通道 {self._channel_index + 1} 开始推流")
-        self._set_state(StreamState.STARTING)
+        worker.start()
 
-    def _start_preflight_check(self, rtsp_server: str):
+    def _start_preflight_check(self, rtsp_server: str):  # noqa: ARG002
         if self._preflight_worker:
             return
         tasks = []
@@ -561,20 +621,6 @@ class StreamController(QObject):
                 lambda: check_rtsp_reachable(self._source_path),
                 "RTSP 源不可用：",
             ))
-        username = self._username_getter()
-        auth_secret = self._auth_secret_getter()
-        machine_name = self._machine_name_getter()
-        tasks.append((
-            "正在检查 RTSP 服务器...",
-            lambda: check_rtsp_server_reachable(
-                rtsp_server,
-                username=username,
-                auth_secret=auth_secret,
-                machine_name=machine_name,
-            ),
-            "",
-        ))
-
         worker = ConnectivityCheckWorker(tasks, self)
         self._preflight_worker = worker
         worker.stage_changed.connect(
@@ -629,12 +675,18 @@ class StreamController(QObject):
             self._preview = True
             self._card.set_preview_active(True)
 
-    def _on_preview_closed(self):
+    def _on_preview_closed(
+        self, worker: FFmpegWorker | None = None, generation: int | None = None,
+    ):
+        if not self._is_current_worker(worker, generation):
+            return
         self._preview = False
         self._card.set_preview_active(False)
 
     def stop_stream(self):
         self._stop_requested = True
+        if self._start_canceller:
+            self._start_canceller(self)
         if self._preflight_worker:
             self._preflight_worker.stop()
             self._preflight_worker = None
@@ -660,6 +712,8 @@ class StreamController(QObject):
 
     def force_stop(self):
         self._stop_requested = True
+        if self._start_canceller:
+            self._start_canceller(self)
         if self._preflight_worker:
             self._preflight_worker.stop()
             self._preflight_worker = None
@@ -672,10 +726,20 @@ class StreamController(QObject):
             self._worker.stop()
             self._worker.wait(3000)
         self._worker = None
+        self._active_worker_generation = 0
         self._clear_rtsp_urls()
         self._set_state(StreamState.IDLE)
 
-    def _on_worker_status(self, status: str):
+    def _on_worker_status(
+        self,
+        worker_or_status: FFmpegWorker | str,
+        status: str | None = None,
+        generation: int | None = None,
+    ):
+        worker = self._worker if status is None else worker_or_status
+        status = worker_or_status if status is None else status
+        if not self._is_current_worker(worker, generation):
+            return
         self._card.set_status(status, self._state.value)
         if status == "推流中":
             self._source_retry_count = 0
@@ -686,7 +750,16 @@ class StreamController(QObject):
         elif status not in ("已停止",):
             self._report_status(f"通道 {self._channel_index + 1} {status}")
 
-    def _on_worker_error(self, msg: str):
+    def _on_worker_error(
+        self,
+        worker_or_msg: FFmpegWorker | str,
+        msg: str | None = None,
+        generation: int | None = None,
+    ):
+        worker = self._worker if msg is None else worker_or_msg
+        msg = worker_or_msg if msg is None else msg
+        if not self._is_current_worker(worker, generation):
+            return
         if self._handled_worker_failure or self._stop_requested:
             return
 
@@ -704,13 +777,30 @@ class StreamController(QObject):
         self._set_state(StreamState.ERROR)
         self._card.show_error(friendly)
 
-    def _on_worker_progress(self, info: dict):
+    def _on_worker_progress(
+        self,
+        worker_or_info: FFmpegWorker | dict,
+        info: dict | None = None,
+        generation: int | None = None,
+    ):
+        worker = self._worker if info is None else worker_or_info
+        if not self._is_current_worker(worker, generation):
+            return
         pass
 
-    def _on_worker_stopped(self):
+    def _on_worker_stopped(
+        self, worker: FFmpegWorker | None = None, generation: int | None = None,
+    ):
+        if not self._is_current_worker(worker, generation):
+            logger.debug(
+                "忽略旧 worker 的停止信号 ch={} attempt={}",
+                self._channel_index, generation,
+            )
+            return
         self._preview = False
         self._card.set_preview_active(False)
         self._worker = None
+        self._active_worker_generation = 0
         self._clear_rtsp_urls()
         if self._reconnect_timer.isActive():
             self._set_state(StreamState.RECONNECTING)
@@ -726,6 +816,15 @@ class StreamController(QObject):
             self._set_state(StreamState.IDLE)
 
     def _attempt_reconnect(self):
+        if self._stop_requested:
+            self._cancel_reconnect()
+            return
+        if self._start_scheduler:
+            self._start_scheduler(self, True)
+            return
+        self._run_reconnect_attempt()
+
+    def _run_reconnect_attempt(self) -> None:
         if self._stop_requested:
             self._cancel_reconnect()
             return
@@ -805,7 +904,16 @@ class StreamController(QObject):
         return None
 
     def _set_state(self, state: StreamState, text_override: str | None = None):
+        previous = self._state
         self._state = state
+        if previous != state:
+            logger.info(
+                "推流状态转换 ch={} attempt={} {} -> {}",
+                self._channel_index + 1,
+                self._active_worker_generation,
+                previous.value,
+                state.value,
+            )
         active_states = (
             StreamState.STARTING, StreamState.STREAMING,
             StreamState.RECONNECTING, StreamState.STOPPING,
@@ -823,6 +931,13 @@ class StreamController(QObject):
         }
         self._card.set_status(text_override or state_text_map.get(state, ""), state.value)
         self.state_changed.emit(state)
+
+    def _is_current_worker(
+        self, worker: object | None, generation: int | None,
+    ) -> bool:
+        if worker is not None and worker is not self._worker:
+            return False
+        return generation is None or generation == self._active_worker_generation
 
     @property
     def is_streaming(self) -> bool:
