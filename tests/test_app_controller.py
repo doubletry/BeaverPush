@@ -223,35 +223,48 @@ def test_async_codec_probe_refreshes_cards_created_before_probe(monkeypatch):
         app.processEvents()
 
 
-def test_start_all_queues_staggered_starts(controller, monkeypatch):
+def test_start_all_waits_for_streaming_before_starting_next(controller, monkeypatch):
     ctrl, window, saves = controller
     a = ctrl.add_stream()
     b = ctrl.add_stream()
     c = ctrl.add_stream()
     calls: list[str] = []
 
-    monkeypatch.setattr(app_ctrl_module, "BULK_START_INTERVAL_MS", 10)
-
     def make_start(name, stream_ctrl):
-        def _start():
+        def _start(reconnect=False):  # noqa: ARG001
             calls.append(name)
-            stream_ctrl._state = StreamState.STARTING
+            stream_ctrl._set_state(StreamState.STARTING)
         return _start
 
-    monkeypatch.setattr(a, "start_stream", make_start("a", a))
-    monkeypatch.setattr(b, "start_stream", make_start("b", b))
-    monkeypatch.setattr(c, "start_stream", make_start("c", c))
+    monkeypatch.setattr(a, "run_scheduled_start", make_start("a", a))
+    monkeypatch.setattr(b, "run_scheduled_start", make_start("b", b))
+    monkeypatch.setattr(c, "run_scheduled_start", make_start("c", c))
 
     ctrl._on_start_all()
     assert calls == []
 
     app = QApplication.instance() or QApplication([])
-    deadline = time.time() + 1.0
-    while time.time() < deadline and calls != ["a", "b", "c"]:
+    deadline = time.time() + 0.5
+    while time.time() < deadline and calls != ["a"]:
         app.processEvents()
         time.sleep(0.01)
+    assert calls == ["a"]
 
+    # A fixed delay must not release the next start while A is still STARTING.
+    deadline = time.time() + 0.35
+    while time.time() < deadline:
+        app.processEvents()
+        time.sleep(0.01)
+    assert calls == ["a"]
+
+    a._set_state(StreamState.STREAMING)
+    app.processEvents()
+    assert calls == ["a", "b"]
+
+    b._set_state(StreamState.STREAMING)
+    app.processEvents()
     assert calls == ["a", "b", "c"]
+
 
 
 def test_start_all_skips_streaming_and_stop_all_cancels_remaining(controller, monkeypatch):
@@ -265,13 +278,13 @@ def test_start_all_skips_streaming_and_stop_all_cancels_remaining(controller, mo
     monkeypatch.setattr(app_ctrl_module, "BULK_START_INTERVAL_MS", 120)
 
     def make_start(name, stream_ctrl):
-        def _start():
+        def _start(reconnect=False):  # noqa: ARG001
             calls.append(name)
             stream_ctrl._state = StreamState.STARTING
         return _start
 
-    monkeypatch.setattr(a, "start_stream", make_start("a", a))
-    monkeypatch.setattr(c, "start_stream", make_start("c", c))
+    monkeypatch.setattr(a, "run_scheduled_start", make_start("a", a))
+    monkeypatch.setattr(c, "run_scheduled_start", make_start("c", c))
     monkeypatch.setattr(a, "stop_stream", lambda: calls.append("stop-a"))
 
     ctrl._on_start_all()
@@ -292,6 +305,159 @@ def test_start_all_skips_streaming_and_stop_all_cancels_remaining(controller, mo
         time.sleep(0.01)
 
     assert calls == ["a", "stop-a"]
+
+
+def test_reconnecting_stream_releases_slot_for_next_channel(controller, monkeypatch):
+    ctrl, window, saves = controller
+    a = ctrl.add_stream()
+    b = ctrl.add_stream()
+    calls: list[str] = []
+
+    def make_start(name, stream_ctrl):
+        def _start(reconnect=False):  # noqa: ARG001
+            calls.append(name)
+            stream_ctrl._set_state(StreamState.STARTING)
+        return _start
+
+    monkeypatch.setattr(a, "run_scheduled_start", make_start("a", a))
+    monkeypatch.setattr(b, "run_scheduled_start", make_start("b", b))
+
+    ctrl._on_start_all()
+    app = QApplication.instance() or QApplication([])
+    app.processEvents()
+    assert calls == ["a"]
+
+    a._set_state(StreamState.RECONNECTING)
+    app.processEvents()
+
+    assert calls == ["a", "b"]
+
+
+def test_twenty_three_streams_never_have_multiple_startups_in_flight(controller, monkeypatch):
+    ctrl, window, saves = controller
+    streams = [ctrl.add_stream() for _ in range(23)]
+    calls: list[int] = []
+
+    for index, stream in enumerate(streams):
+        def start(reconnect=False, *, current=stream, number=index):  # noqa: ARG001
+            calls.append(number)
+            current._set_state(StreamState.STARTING)
+        monkeypatch.setattr(stream, "run_scheduled_start", start)
+
+    ctrl._on_start_all()
+    app = QApplication.instance() or QApplication([])
+    app.processEvents()
+    assert calls == [0]
+
+    for index, stream in enumerate(streams):
+        assert calls == list(range(index + 1))
+        stream._set_state(StreamState.STREAMING)
+        app.processEvents()
+
+    assert calls == list(range(23))
+
+
+def test_reconnect_request_waits_behind_current_startup(controller, monkeypatch):
+    ctrl, window, saves = controller
+    a = ctrl.add_stream()
+    b = ctrl.add_stream()
+    calls: list[tuple[str, bool]] = []
+
+    def start_a(reconnect=False):
+        calls.append(("a", reconnect))
+        a._set_state(StreamState.STARTING)
+
+    def start_b(reconnect=False):
+        calls.append(("b", reconnect))
+        b._set_state(StreamState.STARTING)
+
+    monkeypatch.setattr(a, "run_scheduled_start", start_a)
+    monkeypatch.setattr(b, "run_scheduled_start", start_b)
+
+    ctrl._on_start_all()
+    app = QApplication.instance() or QApplication([])
+    app.processEvents()
+    a._set_state(StreamState.RECONNECTING)
+    app.processEvents()
+    assert calls == [("a", False), ("b", False)]
+
+    a._attempt_reconnect()
+    app.processEvents()
+    assert calls == [("a", False), ("b", False)]
+
+    b._set_state(StreamState.STREAMING)
+    app.processEvents()
+    assert calls == [("a", False), ("b", False), ("a", True)]
+
+
+def test_stop_cancels_a_manual_start_that_has_not_spawned_yet(controller, monkeypatch):
+    ctrl, window, saves = controller
+    stream = ctrl.add_stream()
+    starts: list[bool] = []
+    monkeypatch.setattr(
+        stream,
+        "run_scheduled_start",
+        lambda reconnect=False: starts.append(reconnect),
+    )
+
+    for _ in range(100):
+        stream.start_stream()
+    stream.stop_stream()
+
+    app = QApplication.instance() or QApplication([])
+    app.processEvents()
+    assert starts == []
+
+
+def test_quit_waits_for_process_supervisor_after_stopping_streams(controller, monkeypatch):
+    ctrl, window, saves = controller
+    stream = ctrl.add_stream()
+    calls: list[str] = []
+    monkeypatch.setattr(ctrl, "save_config", lambda: calls.append("save"))
+    monkeypatch.setattr(stream, "force_stop", lambda: calls.append("stop"))
+    monkeypatch.setattr(
+        app_ctrl_module.process_supervisor,
+        "shutdown",
+        lambda timeout_seconds=5.0: calls.append("reap"),
+    )
+    ctrl._app = mock_app = type(
+        "FakeApp", (), {"quit": lambda self: calls.append("quit")}
+    )()
+
+    ctrl._cleanup_and_quit()
+
+    assert calls == ["save", "stop", "reap", "quit"]
+
+
+def test_quit_is_deferred_until_supervisor_confirms_no_processes(controller, monkeypatch):
+    ctrl, window, saves = controller
+    callbacks = []
+    quits = []
+    remaining = iter([1, 0])
+    monkeypatch.setattr(ctrl, "save_config", lambda: None)
+    monkeypatch.setattr(
+        app_ctrl_module.process_supervisor,
+        "shutdown",
+        lambda timeout_seconds=5.0: None,
+    )
+    monkeypatch.setattr(
+        app_ctrl_module.process_supervisor,
+        "active_count",
+        lambda: next(remaining),
+    )
+    monkeypatch.setattr(
+        app_ctrl_module.QTimer,
+        "singleShot",
+        lambda _delay, callback: callbacks.append(callback),
+    )
+    ctrl._app = type("FakeApp", (), {"quit": lambda self: quits.append(True)})()
+
+    ctrl._cleanup_and_quit()
+
+    assert quits == []
+    assert len(callbacks) == 1
+    callbacks.pop()()
+    assert quits == [True]
 
 
 def test_loading_config_uses_bulk_start_queue(monkeypatch):
