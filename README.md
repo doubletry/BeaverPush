@@ -23,6 +23,13 @@ A multi-channel RTSP streaming desktop client built with **PySide6 + MVC archite
 - 💾 **Auto-save on successful connection test**
 - 🚀 **Launch at startup** (Windows): when enabled, BeaverPush starts with the OS and auto-resumes the streams that were running last time
 
+## Multi-channel startup and RTSP authentication
+
+- Automatic, bulk, manual, and reconnect starts share one application-wide queue. The next FFmpeg process starts only after the current channel is streaming or has explicitly failed.
+- Normal streaming no longer publishes an extra `__connection_test__` stream to the target server. The explicit **Test Connection** action still performs that check.
+- An authenticated RTSP server may receive one credential-free request for each new connection, reply with `401 Unauthorized`, and then receive a retry with credentials. This is the normal RTSP authentication challenge flow.
+- Stop and application exit supervise every FFmpeg/ffplay process. A timed-out graceful termination escalates to process-tree termination and a final kill.
+
 ## Download
 
 Download the latest installer from [GitHub Releases](https://github.com/doubletry/BeaverPush/releases). The installer bundles FFmpeg — no additional setup required.

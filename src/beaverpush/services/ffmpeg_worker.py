@@ -19,16 +19,16 @@ from .ffmpeg_path import get_ffplay
 from .window_capture import WindowCaptureFeeder, ScreenCaptureFeeder
 from .hikcamera_capture import HikCameraFeeder
 from .log_service import logger
+from .process_supervisor import process_supervisor
 from .rtsp_url import mask_sensitive_cmd
 
 # Windows-only subprocess flag; on Unix the attribute does not exist and falls back to 0.
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 DEFAULT_STARTUP_TIMEOUT_SECONDS = 8.0
 RTSP_STARTUP_TIMEOUT_SECONDS = 12.0
-READY_LINE_KEYWORDS = (
-    "press [q] to stop",
-    "output #0, rtsp",
-)
+# Backward-compatible export. Startup readiness now requires parsed progress,
+# so informational FFmpeg banners are deliberately not listed here.
+READY_LINE_KEYWORDS: tuple[str, ...] = ()
 
 
 class FFmpegWorker(QThread):
@@ -64,7 +64,7 @@ class FFmpegWorker(QThread):
         self._capture_feeder: WindowCaptureFeeder | None = None
         self._screen_feeder: ScreenCaptureFeeder | None = None
         self._hik_feeder: HikCameraFeeder | None = None
-        self._stop_flag = False
+        self._stop_event = threading.Event()
         self._cmd: list[str] = []
         self._preview_url: str = ""
         self._preview_enabled: bool = False
@@ -85,6 +85,7 @@ class FFmpegWorker(QThread):
         self._source_type: str = "video"
         self._startup_timeout_seconds = DEFAULT_STARTUP_TIMEOUT_SECONDS
         self._startup_watchdog_thread: threading.Thread | None = None
+        self._process_context = ""
 
     def set_source_type(self, source_type: str):
         self._source_type = source_type
@@ -95,6 +96,9 @@ class FFmpegWorker(QThread):
 
     def set_command(self, cmd: list[str]):
         self._cmd = cmd
+
+    def set_process_context(self, context: str) -> None:
+        self._process_context = context
 
     def set_preview(self, enabled: bool, rtsp_url: str = ""):
         self._preview_enabled = enabled
@@ -140,7 +144,10 @@ class FFmpegWorker(QThread):
         self._stop_preview()
 
     def run(self):
-        self._stop_flag = False
+        if self._stop_event.is_set():
+            self.status_changed.emit("已停止")
+            self.stopped.emit()
+            return
         self._streaming_announced = False
         self.status_changed.emit("正在启动推流...")
         logger.debug("FFmpeg 启动命令: {}", mask_sensitive_cmd(self._cmd))
@@ -159,6 +166,15 @@ class FFmpegWorker(QThread):
                 stderr=subprocess.PIPE,
                 creationflags=CREATE_NO_WINDOW,
             )
+            process_supervisor.register(
+                self._process,
+                kind="ffmpeg",
+                context=self._process_context,
+                command=mask_sensitive_cmd(self._cmd),
+            )
+            if self._stop_event.is_set():
+                self._terminate_process(self._process, "stop-after-spawn")
+                return
             self.status_changed.emit("等待数据...")
             self._start_startup_watchdog()
 
@@ -196,7 +212,7 @@ class FFmpegWorker(QThread):
 
             assert self._process.stderr is not None
             for line in iter(self._process.stderr.readline, b""):
-                if self._stop_flag:
+                if self._stop_event.is_set():
                     break
                 line_str = line.decode("utf-8", errors="replace").strip()
                 if not line_str:
@@ -206,15 +222,12 @@ class FFmpegWorker(QThread):
                 if info:
                     self._mark_streaming()
                     self.progress_info.emit(info)
-                elif self._is_ready_line(line_str):
-                    self._mark_streaming()
-
                 if self._is_error(line_str):
                     self.error_occurred.emit(line_str)
 
             self._process.wait()
 
-            if self._process.returncode != 0 and not self._stop_flag and self._process.stderr:
+            if self._process.returncode != 0 and not self._stop_event.is_set() and self._process.stderr:
                 remaining = self._process.stderr.read().decode(
                     "utf-8", errors="replace"
                 )
@@ -243,7 +256,7 @@ class FFmpegWorker(QThread):
             self.stopped.emit()
 
     def stop(self):
-        self._stop_flag = True
+        self._stop_event.set()
         if self._capture_feeder:
             self._capture_feeder.stop()
             self._capture_feeder = None
@@ -255,39 +268,43 @@ class FFmpegWorker(QThread):
             self._hik_feeder = None
         self._stop_preview()
         if self._process and self._process.poll() is None:
-            try:
-                self._process.terminate()
-            except Exception:
-                pass
+            process_supervisor.request_stop(
+                self._process, reason="worker-stop",
+            )
 
     def _start_preview(self):
         try:
+            command = [
+                get_ffplay(),
+                "-rtsp_transport", "tcp",
+                "-i", self._preview_url,
+                "-window_title", "推流预览",
+                "-x", "640", "-y", "480",
+                "-fflags", "nobuffer",
+                "-flags", "low_delay",
+                "-framedrop",
+                "-an",
+            ]
             self._preview_process = subprocess.Popen(
-                [
-                    get_ffplay(),
-                    "-rtsp_transport", "tcp",
-                    "-i", self._preview_url,
-                    "-window_title", "推流预览",
-                    "-x", "640", "-y", "480",
-                    "-fflags", "nobuffer",
-                    "-flags", "low_delay",
-                    "-framedrop",
-                    "-an",
-                ],
+                command,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 creationflags=CREATE_NO_WINDOW,
+            )
+            process_supervisor.register(
+                self._preview_process,
+                kind="ffplay",
+                context=self._process_context,
+                command=mask_sensitive_cmd(command),
             )
         except Exception:
             pass
 
     def _stop_preview(self):
         if self._preview_process:
-            try:
-                if self._preview_process.poll() is None:
-                    self._preview_process.terminate()
-            except Exception:
-                pass
+            process_supervisor.request_stop(
+                self._preview_process, reason="preview-stop",
+            )
             self._preview_process = None
 
     def _start_preview_monitor(self):
@@ -301,6 +318,7 @@ class FFmpegWorker(QThread):
                 proc.wait()
             except Exception:
                 pass
+            process_supervisor.unregister(proc)
             # 仅当预览仍处于启用状态时才发信号（用户主动停止时已置 False）
             if self._preview_enabled:
                 self._preview_enabled = False
@@ -327,11 +345,9 @@ class FFmpegWorker(QThread):
             self._hik_feeder = None
         self._stop_preview()
         if self._process:
-            try:
-                if self._process.poll() is None:
-                    self._process.kill()
-            except Exception:
-                pass
+            process_supervisor.stop_and_wait(
+                self._process, reason="worker-cleanup",
+            )
             self._process = None
 
     def _start_startup_watchdog(self):
@@ -345,7 +361,7 @@ class FFmpegWorker(QThread):
             while time.monotonic() < deadline:
                 current = self._process
                 if (
-                    self._stop_flag
+                    self._stop_event.is_set()
                     or self._streaming_announced
                     or not current
                     or current.poll() is not None
@@ -355,7 +371,7 @@ class FFmpegWorker(QThread):
 
             current = self._process
             if (
-                self._stop_flag
+                self._stop_event.is_set()
                 or self._streaming_announced
                 or not current
                 or current.poll() is not None
@@ -376,10 +392,9 @@ class FFmpegWorker(QThread):
             except RuntimeError:
                 # Worker QObject 可能已被销毁，避免后台守护线程把进程拖垮
                 pass
-            try:
-                current.terminate()
-            except Exception:
-                pass
+            process_supervisor.request_stop(
+                current, reason="startup-timeout",
+            )
 
         thread = threading.Thread(target=_watch, daemon=True)
         thread.start()
@@ -390,6 +405,10 @@ class FFmpegWorker(QThread):
             return
         self._streaming_announced = True
         self.status_changed.emit("推流中")
+
+    @staticmethod
+    def _terminate_process(process: subprocess.Popen, reason: str) -> None:
+        process_supervisor.stop_and_wait(process, reason=reason)
 
     @staticmethod
     def _parse_progress(line: str) -> dict | None:
@@ -409,11 +428,6 @@ class FFmpegWorker(QThread):
             if m:
                 info[key] = m.group(1).strip()
         return info if info else None
-
-    @staticmethod
-    def _is_ready_line(line: str) -> bool:
-        line_lower = line.lower()
-        return any(keyword in line_lower for keyword in READY_LINE_KEYWORDS)
 
     @staticmethod
     def _is_error(line: str) -> bool:

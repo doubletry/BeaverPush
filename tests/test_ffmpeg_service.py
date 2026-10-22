@@ -1,9 +1,11 @@
 """ffmpeg_service 模块单元测试"""
 
 import subprocess
+import sys
 import time
 from unittest import mock
 
+import psutil
 import pytest
 
 from beaverpush.services.ffmpeg_service import (
@@ -11,6 +13,7 @@ from beaverpush.services.ffmpeg_service import (
     check_rtsp_server_reachable, RTSP_TIMEOUT_US,
     _mask_sensitive_cmd,
 )
+from beaverpush.services.process_supervisor import ProcessSupervisor
 from beaverpush.services import ffmpeg_command as _ffmpeg_command_mod
 
 
@@ -36,6 +39,19 @@ class TestMakeEven:
 
     def test_zero(self):
         assert _make_even(0) == 0
+
+
+class TestMachineReadableProgress:
+    def test_local_video_requests_newline_delimited_progress_on_stderr(self):
+        cmd = build_ffmpeg_command(
+            source_type="video",
+            source_path="sample.mp4",
+            rtsp_url="rtsp://localhost:8554/client1/stream1",
+        )
+
+        progress_index = cmd.index("-progress")
+        assert cmd[progress_index + 1] == "pipe:2"
+        assert progress_index < len(cmd) - 2
 
 
 class TestBuildFfmpegCommandScreen:
@@ -659,7 +675,7 @@ class TestFFmpegWorkerInit:
         assert statuses[2] == "推流中"
         assert progress
 
-    def test_status_turns_streaming_after_ready_line(self):
+    def test_status_turns_streaming_after_first_progress_line(self):
         worker = FFmpegWorker()
         worker.set_command(["ffmpeg", "-i", "test"])
         statuses = []
@@ -667,6 +683,30 @@ class TestFFmpegWorkerInit:
 
         mock_proc = mock.MagicMock()
         mock_proc.returncode = 0
+        mock_proc.wait.return_value = 0
+        mock_proc.stderr.readline.side_effect = [
+            b"frame=    1 fps=0.0 q=22.0 size=N/A time=00:00:00.03 bitrate=N/A speed=1x\n",
+            b"",
+        ]
+        mock_proc.stderr.read.return_value = b""
+
+        with mock.patch(
+            "beaverpush.services.ffmpeg_worker.subprocess.Popen",
+            return_value=mock_proc,
+        ):
+            worker.run()
+
+        assert statuses[:3] == ["正在启动推流...", "等待数据...", "推流中"]
+
+    def test_press_q_banner_does_not_mark_streaming(self):
+        worker = FFmpegWorker()
+        worker.set_command(["ffmpeg", "-i", "test"])
+        statuses = []
+        worker.status_changed.connect(statuses.append)
+
+        mock_proc = mock.MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.poll.return_value = 0
         mock_proc.wait.return_value = 0
         mock_proc.stderr.readline.side_effect = [
             b"Press [q] to stop, [?] for help\n",
@@ -680,7 +720,31 @@ class TestFFmpegWorkerInit:
         ):
             worker.run()
 
-        assert statuses[:3] == ["正在启动推流...", "等待数据...", "推流中"]
+        assert "推流中" not in statuses
+
+    def test_output_header_alone_does_not_mark_streaming(self):
+        worker = FFmpegWorker()
+        worker.set_command(["ffmpeg", "-i", "test"])
+        statuses = []
+        worker.status_changed.connect(statuses.append)
+
+        mock_proc = mock.MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.poll.return_value = 0
+        mock_proc.wait.return_value = 0
+        mock_proc.stderr.readline.side_effect = [
+            b"Output #0, rtsp, to 'rtsp://server/path':\n",
+            b"",
+        ]
+        mock_proc.stderr.read.return_value = b""
+
+        with mock.patch(
+            "beaverpush.services.ffmpeg_worker.subprocess.Popen",
+            return_value=mock_proc,
+        ):
+            worker.run()
+
+        assert "推流中" not in statuses
 
     def test_rtsp_startup_timeout_terminates_process(self):
         worker = FFmpegWorker()
@@ -715,12 +779,79 @@ class TestFFmpegWorkerInit:
         worker = FFmpegWorker()
         mock_proc = mock.MagicMock()
         mock_proc.poll.return_value = None
+        mock_proc.wait.side_effect = lambda timeout=None: time.sleep(0.2)
         worker._process = mock_proc
 
+        started = time.monotonic()
         worker.stop()
+        elapsed = time.monotonic() - started
 
         mock_proc.terminate.assert_called_once()
-        mock_proc.wait.assert_not_called()
+        assert elapsed < 0.1
+
+    def test_stop_before_worker_run_prevents_process_spawn(self):
+        worker = FFmpegWorker()
+        worker.set_command(["ffmpeg", "-i", "test"])
+        worker.stop()
+
+        with mock.patch(
+            "beaverpush.services.ffmpeg_worker.subprocess.Popen"
+        ) as popen:
+            worker.run()
+
+        popen.assert_not_called()
+
+    def test_stop_during_process_spawn_terminates_new_process(self):
+        worker = FFmpegWorker()
+        worker.set_command(["ffmpeg", "-i", "test"])
+        proc = mock.MagicMock()
+        proc.poll.return_value = None
+
+        def spawn(*args, **kwargs):  # noqa: ARG001
+            worker.stop()
+            return proc
+
+        with mock.patch(
+            "beaverpush.services.ffmpeg_worker.subprocess.Popen",
+            side_effect=spawn,
+        ):
+            worker.run()
+
+        proc.terminate.assert_called()
+
+
+class TestProcessSupervisor:
+    def test_timeout_escalates_from_terminate_to_kill_and_unregisters(self):
+        supervisor = ProcessSupervisor()
+        proc = mock.MagicMock()
+        proc.pid = None
+        proc.poll.return_value = None
+        proc.wait.side_effect = [
+            subprocess.TimeoutExpired(cmd="ffmpeg", timeout=0.01),
+            0,
+        ]
+        supervisor.register(proc, kind="ffmpeg", context="test")
+
+        supervisor.stop_and_wait(proc, reason="test", grace_seconds=0.01)
+
+        proc.terminate.assert_called()
+        proc.kill.assert_called()
+        assert supervisor.active_count() == 0
+
+    def test_shutdown_reaps_a_real_child_process(self):
+        supervisor = ProcessSupervisor()
+        proc = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        supervisor.register(proc, kind="ffmpeg", context="integration-test")
+
+        supervisor.shutdown(timeout_seconds=3.0)
+
+        assert proc.poll() is not None
+        assert not psutil.pid_exists(proc.pid)
+        assert supervisor.active_count() == 0
 
 
 class TestFriendlyError:

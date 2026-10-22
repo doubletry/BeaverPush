@@ -693,6 +693,56 @@ class TestProgressSuppression:
 
 
 class TestReconnectBehavior:
+    def test_start_and_reconnect_requests_use_injected_global_scheduler(self):
+        card = _make_mock_card()
+        ctrl = StreamController(
+            card=card,
+            channel_index=0,
+            rtsp_server_getter=lambda: "rtsp://localhost:8554",
+            username_getter=lambda: "alice",
+            machine_name_getter=lambda: "pc1",
+            auth_secret_getter=lambda: "secret",
+        )
+        requests: list[tuple[StreamController, bool]] = []
+        ctrl.set_start_scheduler(
+            lambda stream, reconnect: requests.append((stream, reconnect))
+        )
+
+        ctrl.start_stream()
+        ctrl._attempt_reconnect()
+
+        assert requests == [(ctrl, False), (ctrl, True)]
+
+    def test_normal_start_does_not_publish_target_server_preflight(self):
+        card = _make_mock_card()
+        ctrl = StreamController(
+            card=card,
+            channel_index=0,
+            rtsp_server_getter=lambda: "rtsp://localhost:8554",
+            username_getter=lambda: "alice",
+            machine_name_getter=lambda: "pc1",
+            auth_secret_getter=lambda: "secret",
+        )
+        ctrl._source_type = "video"
+        ctrl._source_path = __file__
+        ctrl._stream_name = "s1"
+        ctrl._video_codec = "libx264"
+
+        with mock.patch(
+            "beaverpush.controllers.stream_controller.check_rtsp_server_reachable"
+        ) as target_check, mock.patch(
+            "beaverpush.controllers.stream_controller.build_ffmpeg_command",
+            return_value=["ffmpeg", "-i", "test"],
+        ), mock.patch(
+            "beaverpush.controllers.stream_controller.FFmpegWorker"
+        ), mock.patch(
+            "beaverpush.controllers.stream_controller.probe_video_info",
+            return_value={},
+        ):
+            ctrl.start_stream()
+
+        target_check.assert_not_called()
+
     def test_rtsp_start_runs_preflight_in_background(self):
         card = _make_mock_card()
         ctrl = StreamController(
@@ -1130,6 +1180,25 @@ class TestPreviewToggle:
         ctrl._on_worker_stopped()
         assert ctrl._preview is False
         card.set_preview_active.assert_called_with(False)
+
+    def test_stale_worker_stopped_signal_does_not_clear_current_worker(self):
+        card = _make_mock_card()
+        ctrl = StreamController(
+            card=card, channel_index=0,
+            rtsp_server_getter=lambda: "rtsp://localhost:8554",
+            username_getter=lambda: "alice",
+            machine_name_getter=lambda: "pc1",
+            auth_secret_getter=lambda: "secret",
+        )
+        old_worker = mock.MagicMock()
+        current_worker = mock.MagicMock()
+        ctrl._worker = current_worker
+        ctrl._state = StreamState.STARTING
+
+        ctrl._on_worker_stopped(old_worker)
+
+        assert ctrl._worker is current_worker
+        assert ctrl._state == StreamState.STARTING
 
     def test_start_stream_stores_rtsp_url(self):
         card = _make_mock_card()

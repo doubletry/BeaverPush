@@ -134,7 +134,11 @@ def build_ffmpeg_command(
         屏幕捕获统一使用 ``"offset:x,y,w,h"`` 格式（包括主屏幕），
         确保只捕获选定的单个屏幕，而不是整个虚拟桌面。
     """
-    cmd = [get_ffmpeg(), "-y"]
+    # FFmpeg's human-readable stats refresh the same terminal line with ``\r``.
+    # A pipe reader using ``readline()`` therefore cannot observe the first
+    # encoded frame until the process exits. Request newline-delimited progress
+    # on stderr so startup readiness is based on a real frame, not a banner.
+    cmd = [get_ffmpeg(), "-y", "-nostats", "-progress", "pipe:2"]
 
     # ---- 输入部分 ----
     if source_type == "video":
